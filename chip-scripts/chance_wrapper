@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# chance_wrapper
+# A (local) wrapper for chance
+# Michael Chambers, 2014
+
+~/Work.bio/lib/CHANCE/CHANCE_MacOS2.0beta/run_chance.sh /Applications/MATLAB/MATLAB_Compiler_Runtime/v717

@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: demulti_and_convert_pipeline  [ -hc ] [ -n number -t index_type ] input_dir final_dir indices
+
+An RNA-seq pipeline
+Input:
+	A directory of qseq files (as output by the sequencing facility)
+Output:
+	A directory containing:
+		A fastq file of each indicated index, plus a fq file of unmatched reads
+		A FastQC output of each fastq file
+Options:
+	-h	Show this message and exit
+	-c	Assume input has phred33 qual scores and convert to phred64
+	-n  Sample qseq files for this number of reads
+	-t  Optional type of indices used during library prep. Possible options are:
+	         Illumina (default)
+	         NuGEN
+Requirements:
+	The following scripts/programs must be in path
+		demultiplex_qseq_dir
+		qseq_to_fq
+		phred33_to_64 (if converting qual scores)
+		fastqc
+
+Michael Chambers, 2014
+'
+
+opt_c=0
+opt_n=0
+opt_t=Illumina
+while getopts "n:hct:" opt; do
+	case $opt in
+		c)
+			echo "@@@ LOG: Converting qual scores to phred64" `date` >&2
+			opt_c=1
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		n)
+			echo "@@@ LOG: Sampling for $OPTARG files" `date` >&2
+			opt_n=$OPTARG
+			;;
+		t)
+			echo "@@@ LOG: Setting library type to $OPTARG" `date` >&2
+			opt_t=$OPTARG
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( $OPTIND - 1 ))
+
+if [ $# -ne 3 ]; then echo "$USAGE"; exit 2; fi
+
+# Initialize Hoffman environment
+source /u/local/Modules/default/init/modules.sh
+module load java/1.7.0_45
+module load samtools
+module load bowtie2
+module load tophat/2.0.9
+# module load perl
+source ~/setup.sh
+in_dir=$1
+# if [ -n "$TMPDIR" ]; then
+# 	out_dir=${TMPDIR}/$(basename $in_dir)_demultiplex
+if [ -n "$SCRATCH" ]; then
+	out_dir=${SCRATCH}/$(basename $in_dir)_demultiplex
+else
+	out_dir=$(basename $in_dir)_demultiplex
+fi
+final_dir=$2
+indices=$3
+
+echo "@@@ LOG: Beginning demultiplexing in dir $out_dir..." `date` >&2
+# Demultiplex directory
+if [ $opt_n -gt 0 ]; then
+	demultiplex_qseq_dir -n $opt_n -t $opt_t $indices $in_dir $out_dir
+else
+	demultiplex_qseq_dir -t $opt_t $indices $in_dir $out_dir
+fi
+
+echo "@@@ LOG: Finished demultiplexing..." `date` >&2
+echo "@@@ LOG: Beginning fastq conversion to dir $final_dir..." `date` >&2
+
+# Operate on demultiplexed files
+for f in ${out_dir}/*_qseq.txt; do
+	# Convert to fastq and convert scores
+	fq_file=${f%_qseq.txt}.fq
+	if [[ $opt_c -eq 1 ]]; then
+		qseq_to_fq $f | phred33_to_64 > $fq_file
+	else
+		qseq_to_fq $f > $fq_file
+	fi
+
+	# Compress and transfer fastq and fastqc out of TMPDIR to final_out
+	[[ -d $final_dir ]] || mkdir $final_dir
+	gzip < $fq_file > ${final_dir}/$(basename $fq_file).gz
+	echo "@@@ LOG: File ${fq_file}.gz complete..." `date` >&2
+done
+
+
+for f in ${final_dir}/s_?_?_??.fq.gz; do
+	# Do FastQC
+	echo "@@@ LOG: Beginning FastQC on file $f..." `date` >&2
+	fastqc_dir=${f%.fq.gz}_fastqc
+	mkdir $fastqc_dir
+	fastqc -o $fastqc_dir $f
+	echo "@@@ LOG: FastQC done..." `date` >&2
+done
+
+echo "@@@@ DONE @@@@" `date` >&2

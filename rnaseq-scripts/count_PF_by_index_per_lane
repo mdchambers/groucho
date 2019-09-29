@@ -1,0 +1,92 @@
+#!/bin/bash
+#!/usr/bin/env bash
+USAGE='
+Usage: countPFbyIndexPerLane.sh [ -h ] qseq_directory
+
+Outputs number of good passing, failing, and total PF values from a directory
+of qseq files (corresponding to one lanes worth of data.
+Outputs as three columns corresponding to the above values, one per index.
+
+Michael Chambers, 2013
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+if [ $# -eq 0 ]; then echo $USAGE >&2 ; exit 1; fi
+LaneDir=$1
+
+LaneNum=${LaneDir:(-1)}
+
+FileNum=`find $LaneDir -name s_?_2_????_qseq.txt.gz | wc -l | tr -s ' ' | cut -d' ' -f 2` 
+
+echo "@@@ Doing Lane $LaneNum with $FileNum tiles..." >&2
+
+zcat -f $LaneDir/s_?_2_????_qseq.txt* | awk '
+	BEGIN {
+		types[" "] = 0;
+		pass[" "] = 0;
+		fail[" "] = 0;
+		numtypes = 0;
+	}
+	{
+		if(NF != 11){
+			ignore
+		} else {
+			seq = substr($9,1,6)
+			pfvalue = $11
+		}
+		if(pass[seq] == 0 && fail[seq] == 0){
+			types[numtypes] = seq
+			pass[seq] = 0
+			fail[seq] = 0
+			numtypes++
+		}
+		if(pfvalue == 0){
+			fail[seq]++;
+		} else if(pfvalue == 1){
+			pass[seq]++;	
+		} else {
+			exit 1;
+		}
+		
+	}
+	END {
+		for(t in types){
+			if( t != " "){
+				print types[t], pass[types[t]], fail[types[t]]
+			}
+		}
+	}' | tr ' ' '\t' | sort -k 1
+
+
+# for LaneDir in $@; do
+# #for LandDir in ../tmp/Sx*/s_2_2_????_qseq.txt.gz
+# 	# LaneID=`basename $LaneDir`
+# 	# LaneNum=${LaneDir:(-1)}
+# 	# LaneIndex=`grep $LaneNum $LANE_INDEX | cut -f 2 | tr ',' '|'`
+# 	# echo "Doing lane $LaneNum with indices $LaneIndex ..." >&2
+# 	# echo $LaneID $LaneIndex
+# 	echo $LaneDir
+# 	zcat $LaneDir/s_?_2_????_qseq.txt.gz | awk '
+# 	{
+# 		x[substr($9,1,6)]++;
+# 	}
+# 	END {
+# 		for( i in x){
+# 			print x[i], i;
+# 		}
+# 	}
+# 	'
+# done

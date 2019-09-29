@@ -1,0 +1,70 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my @outseq;
+my $cres = -1;
+my $cchain = '';
+my $pdbname = shift;
+my $pdbbase = $pdbname;
+$pdbbase =~ s/.pdb//;
+my %aa = (
+	'ALA' => 'A',
+	'ILE' => 'I',
+	'LEU' => 'L',
+	'MET' => 'M',
+	'PHE' => 'F',
+	'TRP' => 'W',
+	'TRY' => 'Y',
+	'TYR' => 'Y',
+	'VAL' => 'V',
+	'PRO' => 'P',
+	'ARG' => 'R',
+	'HIS' => 'H',
+	'LYS' => 'K',
+	'ASP' => 'D',
+	'GLU' => 'E',
+	'SER' => 'S',
+	'THR' => 'T',
+	'ASN' => 'N',
+	'GLN' => 'Q',
+	'CYS' => 'C',
+	'GLY' => 'G'
+);
+
+open FILE, "< $pdbname";
+while(<FILE>){
+	next unless /^ATOM/;
+	my @line = split;
+	if($cchain ne $line[4]){
+		if($#outseq > 1){
+			&printSeq(\@outseq, $cchain);
+		}
+		@outseq = ();
+		$cchain = $line[4];
+	}
+	if($cres < 0){
+		$cres = $line[5];
+		push @outseq, $line[3];
+	}
+	if($cres != $line[5]){
+		push @outseq, $line[3];
+	}
+	$cres = $line[5];
+}
+printSeq(\@outseq, $cchain);
+close FILE;
+sub printSeq{
+	my $sref = shift;
+	my @seq = @$sref;
+	my $c = shift;
+
+	print ">${pdbbase}-" . $c . "\n";
+	for my $s (@seq){
+		#print "YO: $s\n";
+		print $aa{$s};
+	}
+	print "\n";
+}
+	
+				

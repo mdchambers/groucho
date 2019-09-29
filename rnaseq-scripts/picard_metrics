@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: picard_metrics.sh [ -h ] [ -d output_directory ] tophat_dir [ tophat_dir ... ]
+
+Generates metrics using PicardTools
+
+Michael Chambers, 2012
+'
+
+opt_d=.
+
+while getopts "hd:" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		d)
+			opt_d=$OPTARG
+			echo "Writing output to directory $opt_d ..."
+			[ -d $opt_d ] || mkdir $opt_d
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $(( OPTIND - 1 ))
+
+if [ $# -lt 1 ]; then
+	echo $USAGE
+	exit 2
+fi
+
+PICARD_DIR=/u/local/apps/picard-tools/current
+REF_FLAT=~/annotation/dm3.refFlat
+
+for dir in $@; do
+	bam=${dir}/accepted_hits.bam
+	echo "Running CollectRnaSeqMetrics.jar on $dir accepted_hits.bam using ref: $(basename $REF_FLAT)" >&2
+	out_file=${opt_d}/$( basename $dir ).picard
+	out_pdf=${opt_d}/$( basename $dir ).pdf
+	java -Xmx2g -jar ${PICARD_DIR}/CollectRnaSeqMetrics.jar \
+		REF_FLAT=$REF_FLAT \
+		STRAND_SPECIFICITY=NONE \
+		CHART_OUTPUT=${out_pdf} \
+		INPUT=$bam \
+		OUTPUT=$out_file
+done

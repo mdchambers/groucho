@@ -1,0 +1,133 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+my $USAGE ='
+Usage:   -h tophat_dir1 [ tophat_dir2 ... ]
+
+Summarizes tophat
+
+Directory
+PassPrep
+LeftInputReads
+LeftMappedReads
+LeftMultipleMappedReads
+RightInputReads
+RightMappedReads
+RightMultipleMappedReads
+OverallAlignmentRate
+AlignedPairs
+MultipleAlignedPairs
+DiscordantPairs
+ConcordantPairAlignmentRate
+Insertions
+Deletions
+Junctions
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+#&usage if($#ARGV < 0);
+
+my @dirs = @ARGV;
+
+my $header = "Directory	PassPrep	LeftInputReads	LeftMappedReads	LeftMultipleMappedReads	RightInputReads	RightMappedReads	RightMultipleMappedReads	OverallAlignmentRate	AlignedPairs	MultipleAlignedPairs	DiscordantPairs	ConcordantPairAlignmentRate	Insertions	Deletions	Junctions\n";
+
+print $header;
+
+for my $d (@dirs){
+	if( ! -e "$d/align_summary.txt"){
+		print STDERR "ERROR: Directory $d does not have the appropriate files! Skipping...\n";
+		next;
+	}
+	chomp(my $base = `basename $d`);
+	print "$base\t";
+
+	my $passprep = 0;
+	my $left_input = 0;
+	my $left_mapped = 0;
+	my $left_multiple = 0;
+	my $right_input = 0;
+	my $right_mapped = 0;
+	my $right_multiple = 0;
+	my $overall = 0;
+	my $pairs = 0;
+	my $pairs_multiple = 0;
+	my $pairs_discord = 0;
+	my $pair_concord_rate = 0;
+	my $insertions = 0;
+	my $deletions = 0;
+	my $junctions = 0;
+
+	# Get passprep
+	open PREP, "< $d/prep_reads.info";
+	while(<PREP>){
+		if(/reads_out/){
+			chomp;
+			my @l = split( /=/, $_);
+			$passprep = $l[1];
+		}
+	}
+	close PREP;
+
+	# Analyze align_summary.txt
+	open ALIGN, "< $d/align_summary.txt";
+	my $align_length = 0;
+	$align_length++ while(<ALIGN>);
+	close ALIGN;
+	open ALIGN, "< $d/align_summary.txt";
+	my $line = 0;
+	while(<ALIGN>){
+		$line++;
+		my @l = split;
+		if( $align_length == 7){
+			$left_input = $l[1] if $line == 2;
+			$left_mapped = $l[1] if $line == 3;
+			$right_input = $l[1] if $line == 5;
+			$right_mapped = $l[1] if $line == 6;
+			$overall = $l[0] if $line == 7;
+		} elsif ( $align_length == 4){
+			$left_input = $l[1] if $line == 2;
+			$left_mapped = $l[1] if $line == 3;
+			$overall = $l[0] if $line == 4;
+		} else {
+			$left_input = $l[1] if $line == 2;
+			$left_mapped = $l[1] if $line == 3;
+			$left_multiple = $l[2] if $line == 4;
+			if( $line == 5 && $#l > 1){
+				$overall = $l[0];
+			}
+			$right_input = $l[1] if $line == 6;
+			$right_mapped = $l[1] if $line == 7;
+			$right_multiple = $l[2] if $line == 8;
+			$overall = $l[0] if $line == 9;
+			$pairs = $l[2] if $line == 11;
+			$pairs_multiple = $l[2] if $line == 12;
+			$pairs_discord = $l[1] if $line == 13;
+			$pair_concord_rate = $l[0] if $line == 14;
+		}
+	}
+	close ALIGN;
+
+	open JUNCTION, "$d/junctions.bed";
+	$junctions++ while(<JUNCTION>);
+	close JUNCTION;
+
+	open INSERTIONS, "$d/insertions.bed";
+	$insertions++ while(<INSERTIONS>);
+	close INSERTIONS;
+
+	open DELETIONS, "$d/deletions.bed";
+	$deletions++ while(<DELETIONS>);
+	close DELETIONS;
+	print $passprep . "\t" . $left_input . "\t" . $left_mapped . "\t" . $left_multiple . "\t" . $right_input . "\t" . $right_mapped . "\t" . $right_multiple . "\t" . $overall . "\t" . $pairs . "\t" . $pairs_multiple . "\t" . $pairs_discord . "\t" . $pair_concord_rate . "\t" . $insertions . "\t" . $deletions . "\t" . $junctions . "\n";
+}
+
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

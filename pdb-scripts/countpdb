@@ -1,0 +1,6 @@
+#!/bin/bash
+
+for x in `lsdir`; do
+	echo -n $x;
+	find $x -name "*pdb.gz" -o -name "*pdb" | wc -l
+done

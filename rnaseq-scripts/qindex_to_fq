@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: qindexToFQ.sh [ -hc ] input_qindex_file output_directory
+
+Converts demultiplexed qindex file to FastaQ
+Reads fastq description elements from filename, so file should adhere to the following format:
+
+Lane?_??_qindex.txt.gz
+
+First ? - lane
+Second ?? - index
+		
+Options:
+
+	-c	Compress output (gzip)
+
+Michael Chambers, 2013
+'
+COMPRESS=0
+while getopts "hc" opt; do
+	case $opt in
+		c)
+			COMPRESS=1
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $((OPTIND-1))
+
+file=$1
+OUT_DIR=$2
+if [ ! -d $OUT_DIR ]; then
+	echo "@@@ Output directory does not exist! $OUT_DIR" `date` >&2
+	exit 1
+fi
+
+
+convert() {
+	BASE=`basename $file`
+	LANE=${BASE:4:1}
+	INDEX=${BASE:6:2}
+
+	OUTFILE=${OUT_DIR}/${BASE//_qindex.txt*/}.fq
+	echo '@@@ ' "Starting fastq conversion of $BASE..." `date` >&2
+	CMD=cat
+	if [[ $file =~ .gz ]]; then
+		CMD=zcat
+	fi
+	$CMD < $file | awk '
+		BEGIN { readnum = 0; }
+		{
+			if(NF != 5) {
+				#ignore
+			} else {
+				lane		= '$LANE'
+				ind		= '$INDEX'
+				read_seq 	= $1
+				index_seq   = $2
+				read_qual   = $3
+				index_qual 	= $4
+				pf_val   	= $5
+				readnum++;
+				mylen = length(read_seq);
+				printf "\@%09d\:%s\:%s\:%s\:%01d\#len=%02d\n", readnum, lane, ind, index_seq, pf_val, mylen;
+				print read_seq;
+				print "\+";
+				print read_qual;
+ 			}
+ 			
+		}' > $OUTFILE
+		# cat $OUTFILE >> $ALLOUT
+	if [ $COMPRESS == 1 ]; then
+		gzip --best -f $OUTFILE
+	fi
+	echo '@@@ ' "Done" `date` >&2
+}
+
+convert $input
+

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+# A simple phantompeak wrapper
+# phantompeakqualtools obtained from https://code.google.com/p/phantompeakqualtools/ 14/10/1
+# Typical usage:
+# phantompeak_wrapper -c=<bam> -savp -out=<out.file>
+
+# Michael Chambers, 2014
+
+# Initialize Hoffman environment
+source /u/local/Modules/default/init/modules.sh
+module load samtools
+module load R
+source ~/.bashrc
+
+Rscript ~/lib/phantompeakqualtools/run_spp.R $@
+
+

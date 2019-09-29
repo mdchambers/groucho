@@ -1,0 +1,222 @@
+#!/usr/bin/env perl
+use strict;
+use Getopt::Std;
+use File::Basename;
+
+my $USAGE ='
+Usage: demultiplex_qindex [ -hc ] [ -o output_dir ] lane tile indices [ qindex_file ]
+
+Splits a qindex file into multiple files by indexing adapter. Can take qindex_file as
+argument or from STDIN
+
+E.g.
+
+zcat < s_2_1_1101_qindex.txt.gz | demultiplex.pl 2 1101 1,2,8,10
+OR
+demultiplex.pl 2 1101 1,2,8,10 s_2_1_1101_qindex.txt
+
+Using the following 4 adapters:
+
+ATCACG (1) TTAGGC (3) ACTTGA (8) GATCAG (10)
+
+would be split into:
+
+s_2_1_1101_01_qindex.txt
+s_2_1_1101_03_qindex.txt
+s_2_1_1101_08_qindex.txt
+s_2_1_1101_10_qindex.txt
+
+Reads that do not match any of the adapters given for search are dumped in
+
+s_2_1_1101_00_qindex.txt
+
+Options:
+
+	-c		Compress output files (gzip)
+    -o		Optional output directory
+
+Michael Chambers, 2013
+';
+
+our($opt_h, $opt_o, $opt_c);
+getopts('cho:');
+&usage if($opt_h);
+
+# Check if enough arguments; exit otherwise
+if($#ARGV < 2){
+	&usage;
+}
+
+# Define input file and output directories
+my $qindex_file;
+my $output_dir = ".";
+$output_dir = $opt_o if(defined $opt_o);
+
+# Read command arguments
+my $lane = shift;
+my $tile = shift;
+my $indices = shift;
+
+my $file;
+if($#ARGV == -1){
+	#Output dir given as arg; stdin as input
+	$file = "stdin";
+	$qindex_file = *STDIN;
+} else{
+	$file = shift;
+	print STDERR "@@@ Opening $file...\n";
+	if($file =~ /gz$/){
+		system("zcat $file > ${file}.tmp");
+		open $qindex_file, "< ${file}.tmp" or die "Could not open $file";
+	} else{
+		open $qindex_file, "< $file" or die "Could not open $file";
+	}
+}
+
+#Generate a hash of associated adapter sequences and ID numbers
+my %INDEXNUMS = ();
+my %INDEXNUMS = qw(
+	1 ATCACG 2 CGATGT 3 TTAGGC 4 TGACCA 5 ACAGTG
+	6 GCCAAT 7 CAGATC 8 ACTTGA 9 GATCAG
+	01 ATCACG 02 CGATGT 03 TTAGGC 04 TGACCA 05 ACAGTG
+	06 GCCAAT 07 CAGATC 08 ACTTGA 09 GATCAG 10 TAGCTT
+	11 GGCTAC 12 CTTGTA 13 AGTCAA 14 AGTTCC 15 ATGTCA
+	16 CCGTCC 17 GTAGAG 18 GTCCGC 19 GTGAAA 20 GTGGCC
+	21 GTTTCG 22 CGTACG 23 GAGTGG 24 GGTAGC 25 ACTGAT
+	26 ATGAGC 27 ATTCCT 28 CAAAAG 29 CAACTA 30 CACCGG
+	31 CACGAT 32 CACTCA 33 CAGGCG 34 CATGGC 35 CATTTT
+	36 CCAACA 37 CGGAAT 38 CTAGCT 39 CTATAC 40 CTCAGA
+	41 GACGAC 42 TAATCG 43 TACAGC 44 TATAAT 45 TCATTC
+	46 TCCCGA 47 TCGAAG 48 TCGGCA);
+
+#Generate a hash for reverse conversion
+my %REV_INDEX = ();
+while((my $key, my $value) = each %INDEXNUMS){
+	$REV_INDEX{$value} = $key;
+}
+
+my @input_indices = split(/,/, $indices);
+
+
+#Check if indices given as numbers. If so, find sequence. Then call demultiplex with array of sequences
+if(length($input_indices[0]) < 5){
+	#Logging
+	# print STDERR '@@@ Converting to text adapters from ';
+	# print STDERR "$_, " for (@input_indices);
+	# print STDERR "...\n";
+
+	demultiplexByCode(@input_indices);
+} else {
+	demultiplexByIndex(@input_indices);
+}
+
+if( -e "${file}.tmp" ){
+	unlink "${file}.tmp";
+}
+
+# Given a list of index codes, splits the input file into multiple output files, one per index
+sub demultiplexByCode{
+	my @codes = @_;
+
+	#Determine filenames for output, and open filehandles
+	#Logging
+	print STDERR "@@@ Splitting $file into " .  ($#codes + 1) . " files using adapters ";
+	print STDERR "$_, " for @codes;
+	print STDERR "...\n";
+
+	#Open files for output
+	my %output_filehandles;
+	my @outnames = ();
+
+	# Open an output file for each index and 00
+	for my $i (@codes, "00"){
+		my $current_output = sprintf("%s/s_%s_1_%s_%.2d_qindex.txt", $output_dir, $lane, $tile, $i);
+
+		push @outnames, $current_output;
+
+		print STDERR "@@@ LOG: Opening " . $current_output . " for writing...\n";
+
+		open my $fh, ">", $current_output or die "@@@ ERROR: Could not open $current_output\n";
+		$output_filehandles{$i} = $fh;
+	}
+
+	#Generate mismatches for each sequence
+	my %mismatches;
+	print STDERR "@@@ LOG: Matching with 1 mismatch...\n";
+	for (@codes){
+		$mismatches{$_} = generateMismatch($INDEXNUMS{$_});
+		# print STDERR "YO: $mismatches{$_}\n";
+		# print STDERR "For $_ ...:\n";
+	}
+	# for my $k (keys %mismatches){
+	# 	my $x = $mismatches{$k};
+	# 	my @c = @$x;
+	# 	print STDERR "KEY: $k\n";
+	# 	print STDERR "CODE: $_\n" for @c;
+	# }
+
+	#Open QINDEX file for input, and write lines to output files based on adapter sequence (col 2)
+	while(<$qindex_file>){
+		chomp;
+		my $line = $_;
+		my $curr_index = ( split /\t/, $line )[1];
+		# Cut index to first five characters
+		$curr_index = substr($curr_index, 0, 6);
+		# print STDERR "YO: $curr_index \n";
+		my $matched = 0;
+		for my $i (@codes){
+			my @seq = @{$mismatches{$i}};
+			for my $s (@seq){
+				next if $matched;
+				if( $curr_index =~ $s){
+					print { $output_filehandles{$i} } $line . "\n";
+					$matched = 1;
+				}
+			}
+		}
+		unless($matched){
+			print { $output_filehandles{"00"} } $line . "\n";
+		}
+	}
+
+	#Close filehandles
+	for my $i (keys %output_filehandles){
+		close $output_filehandles{$i};
+	}
+	if($opt_c){
+		for my $o (@outnames){
+			system("gzip", "-f", "--best", $o);
+		}
+	}
+}
+
+#Given a string, returns an array of every string with a . in each position
+sub generateMismatch{
+	my $seq= shift;
+
+	my @patterns;
+	for(my $i = 0; $i < length($seq); $i++){
+		my $mm = $seq;
+		substr($mm, $i, 1 ) = ".";
+		push @patterns, $mm
+	}
+	# print "Returning for $seq:\n";
+	# print "$_\n" for @patterns;
+	return \@patterns;
+}
+
+
+# Given a list of indices, splits the input file into multiple output files, one per index
+sub demultiplexByIndex{
+	my @indices = @_;
+	my @codes = ();
+	for my $i (@indices){
+		push @codes, $REV_INDEX{$i};
+	}
+	demultiplexByCode(@codes);
+}
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#
+# A simple macs2 wrapper
+#
+# Michael Chambers, 2014
+
+# Initialize Hoffman environment
+source /u/local/Modules/default/init/modules.sh
+module load python/2.7.3
+source ~/.bashrc
+
+macs2 $@

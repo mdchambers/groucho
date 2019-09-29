@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: summarize_picard [ -h ] picard_file1 picard_file2 [ picard_file3 [ ... ]]
+
+Aggregates data from multiple PicardTools analyses
+
+Michael Chambers, 2014
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+files=( $@ )
+# Write header
+echo -n "Sample	"
+sed -n '7p' < ${files[0]}
+
+# Writes info
+for x in ${files[@]}; do
+	base_x=$(basename $x .metrics)
+	echo -n "$base_x	"
+	sed -n '8p' < $x
+done

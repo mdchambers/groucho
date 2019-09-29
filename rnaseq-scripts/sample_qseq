@@ -1,0 +1,64 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+use PerlIO::gzip;
+my $USAGE ='
+Usage: sample_qseq.pl  -h num file
+
+Pulls <num> random lines from a qseq <file>
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+&usage if($#ARGV < 1);
+
+my ($number, $file) = @ARGV;
+
+if($file =~ /.*\.gz/){
+    open FILE, "<:gzip", $file or die "Could not open $file using gzip\n";
+} else {
+    open FILE, "<", $file or die "Could not open file\n";
+}
+
+my $len = 0;
+$len++ while(<FILE>);
+
+close FILE;
+
+if($file =~ /.*\.gz/){
+    open FILE, "<:gzip", $file or die "Could not open $file using gzip\n";
+} else {
+    open FILE, "<", $file or die "Could not open file\n";
+}
+
+my $cutoff = 1 - $number / $len;
+
+my $total = 0;
+LOOP:
+while(<FILE>){
+    if( rand() >= $cutoff){
+        print;
+        $total++;
+    }
+    last if $total >= $number;
+}
+if($total < $number){
+    close FILE;
+    open FILE, "<:gzip", $file or die "Could not open $file using gzip\n";
+    goto LOOP;
+}
+
+
+
+close FILE;
+
+print STDERR "DONE " . $file . " " . `date` . "\n";
+
+sub usage{
+    print STDERR $USAGE;
+    exit 2;
+}

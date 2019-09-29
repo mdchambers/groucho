@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: demultiplex_qseq_dir_parallel [ -h ] action input_directory output_directory indices
+
+Queues and handles the demultiplexing of a directory of qseq files
+Action can be one of the following
+	demultiplex
+		Demultiplexes files in parallel into output_directory
+	merge
+		Merges previously demultiplexed files into a single file, in parallel
+
+
+Options:
+	h	Display this message and exit
+	t	Type of indices numbers used for library prep. Valid options are Illumina and NuGEN. Defaults to Illumina
+
+Michael Chambers, 2014
+'
+
+opt_t=Illumina
+while getopts "ht:" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		t)
+			echo "Using library type $OPTARG" >&2
+			opt_t=$OPTARG
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+action=$1
+in_dir=$2
+out_dir=$3
+indices=$4
+
+if [[ "$action" == "demultiplex" ]]; then
+	num_files=$( ls -1 $in_dir | wc -l )

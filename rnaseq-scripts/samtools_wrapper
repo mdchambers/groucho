@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#
+# A samtools wrapper
+#
+# Michael Chambers, 2014
+
+# Initialize Hoffman environment
+source /u/local/Modules/default/init/modules.sh
+module load samtools
+. ~/.bashrc
+
+samtools $@

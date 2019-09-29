@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# picard_wrapper
+# A simple wrapper for Picard tools on hoffman
+# Michael Chambers, 2014
+
+PICARD_DIR=/u/local/apps/picard-tools/current
+jar=${1}
+shift
+
+java -Xmx2g -jar ${PICARD_DIR}/${jar} $@

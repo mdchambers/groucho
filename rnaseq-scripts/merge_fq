@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: mergeFq.sh [ -h ]
+
+Merges all fq files in a directory into one fq file
+
+Michael Chambers, 2012
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+dir=$1
+
+if [ ! -d $dir ]; then
+	echo "@@@ Could not find directory ${dir}..." `date` >&2
+	exit 1
+fi
+
+cd $dir
+if [ -e tmpfile ]; then rm tmpfile; fi
+
+for f in *fq.gz; do
+	gunzip -c $f
+done > tmpfile
+gzip --best -c tmpfile
+rm tmpfile
+

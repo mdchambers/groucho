@@ -1,0 +1,41 @@
+#!/bin/bash
+USAGE='fasta.bp.multi 1.0 Copyright (C) 2011 Michael Chambers
+
+Counts the number of residues in each fasta file and outputs the result.
+
+USAGE:
+
+	fasta.bp.multi [ -h | -n ] file(s)
+
+OPTIONS
+	-h Display this message and exit
+	-n Does not count N residues in fasta file(s)'
+
+count_n=true
+
+while getopts "nh" opt; do
+	case $opt in
+		n)
+		 count_n=false
+		 ;;
+		h)
+		 echo "$USAGE"
+		 exit;
+		 ;;
+	esac
+done
+shift $((OPTIND-1))
+
+count(){
+	x=$1
+	if $count_n; then
+		cat $x | grep -v "^>" | tr -d "\n" | wc -m | chomp
+	else
+		cat $x | grep -v "^>" | tr -d "Nn\n" | wc -m | chomp
+	fi
+}
+
+for x in $@; do
+	echo -n "$x	"
+	count $x
+done

@@ -1,0 +1,102 @@
+#!/usr/bin/env perl
+use strict;
+use Getopt::Std;
+my $USAGE ='
+Usage: tophat_benchmark.pl -h arg_file run fq_file tophat_out_dir analysis_out_dir
+
+Performs tophat benchmarking, using arguments read from arg_file
+
+Arguments:
+	arg_file	File containing arguments; first column is condition name; Rest of line is interpreted as arguments
+	run			Benchmark run designator; is prefixed to tophat output directories
+	fq_file		Fastq file (.fq or .fq.gz) from which analysis will begin
+	tophat_out_dir		Directory to output tophat directories
+	analysis_out_dir	Directory to write output (HTSeq and Picard output) for each benchmark
+
+
+
+Michael Chambers, 2013
+';
+
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+&usage if($#ARGV < 3);
+
+my $arg_file = shift;
+my $run = shift;
+my $fq_file = shift;
+my $tophat_out_dir = shift;
+die "No directory $tophat_out_dir" unless( -d $tophat_out_dir);
+my $analysis_out_dir = shift;
+
+my $bowtie_index = "~/dm3_igenome_bowtie2index/genome";
+
+# Read SGE_TASK_ID for parallelization; if not defined, assign default of 1
+my $analysis_num = $ENV{'SGE_TASK_ID'};
+$analysis_num = 1 if(length($analysis_num) == 0);
+print STDERR "Beginning benchmark with SGE_TASK_ID $analysis_num " . `date` . "\n";
+
+# Read benchmarking arguments to hash
+my (@arg_names, @arg_conditions);
+open FILE, "< $arg_file" or die("Could not open file $arg_file!!! exiting\n");
+while(<FILE>){
+	chomp;
+	my @line = split;
+	push( @arg_names, $line[0]);
+	if($#line == 0){
+		push( @arg_conditions, "");
+	} else {
+		push( @arg_conditions, join (" ", @line[1..$#line]));
+	}
+}
+
+# Select condition_name and arguments for this SGE_TASK_ID, correcting for the job lower index = 1 limitation
+my $condition_name = $arg_names[$analysis_num - 1];
+print STDERR "@@@ LOG: Condition Name: $condition_name \n";
+my $tophat_args = $arg_conditions[$analysis_num - 1];
+print STDERR" @@@ LOG: Condition Arguments: " . $tophat_args . "\n";
+
+# Perform Tophat alignment with arguments
+
+$tophat_out_dir = $tophat_out_dir . "/" . $run . "_" . $condition_name;
+
+if( -d $tophat_out_dir){
+	print STDERR "@@@ LOG: Tophat output directory $tophat_out_dir already exists; attempting to resume..." . `date` . "\n";
+	system("tophat", "-R", $tophat_out_dir);
+} else {
+	mkdir $tophat_out_dir or die "Could not make directory $tophat_out_dir... exiting\n";
+	my $command = "tophat -o $tophat_out_dir $tophat_args $bowtie_index $fq_file";
+	print STDERR "@@@ LOG: Calling tophat with command $command \n" . `date` . "\n";
+	`$command`;
+}
+
+#Check if analysis_out_dir exists; if not make
+mkdir $analysis_out_dir unless( -d $analysis_out_dir);
+
+# Perform HTSeq gene count pileup
+my $htseq_out = $analysis_out_dir . "/" . $run . "_" . $condition_name . ".htseq";
+
+if( -e $htseq_out){
+	print STDERR "HTSeq output $htseq_out already exists... skipping" . `date` . "\n";
+} else {
+	# system('samtools view, tophat_out_dir/accepted_hits.bam | htseq-count -s no - ~/FlyBase/Drosophila_melanogaster.BDGP5.72.mod1.gtf > htseq_out');
+	`samtools view $tophat_out_dir/accepted_hits.bam | htseq-count -s no - ~/FlyBase/Drosophila_melanogaster.BDGP5.72.mod1.gtf > $htseq_out`;
+}
+my $picard_out = $analysis_out_dir . "/" . $run . "_" . $condition_name . ".metrics";
+my $picard_pdf = $picard_out;
+$picard_pdf =~ s/metrics/pdf/;
+# Perform PicardTools CollectRNASeqMetrics
+if( -e $picard_out){
+	print STDERR "PicardTools output $picard_out already exists... skipping" . `date` . "\n";
+} else {
+	`java -Xmx2g -jar \${PICARD_DIR}/CollectRnaSeqMetrics.jar REF_FLAT=/u/home/m/mchamber/FlyBase/dm3.refFlat STRAND_SPECIFICITY=NONE CHART_OUTPUT=$picard_pdf INPUT=$tophat_out_dir/accepted_hits.bam OUTPUT=$picard_out`;
+}
+
+print STDERR "@@@ DONE " . `date` . "\n";
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

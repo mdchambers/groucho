@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_qseq_2_3_tophat_htseq_picard [ -h ] in_dir scratch_out_dir analysis_out_dir lane index
+
+Takes a directory of qindex files, such as those produced as the
+output of qseqPipeline.sh, and performs the following operations:
+
+1- mergeQindexbyIndex.sh
+	Merges the demultiplexed qindex files (one file per tile) to one file
+	Input:
+		in_dir/s_?_?_????_??_qindex.txt.gz
+		where ? are:
+			lane
+			end
+			tile
+			index
+	Output:
+		scratch_out_dir/Lane?_??_qindex.txt.gz
+		where ? are:
+			lane
+			index
+2- qindexToFQ.sh
+	Converts merged qindex files to fastq
+	Input:
+		scratch_out_dir/Lane?_??_qindex.txt.gz
+		where ? are:
+			lane
+			index
+	Output:
+		scratch_out_dir/Lane?_??.fq.gz
+		where ? are:
+			lane
+			index
+3- tophat
+	Aligns fastq files to provided genome
+	Input:
+		scratch_out_dir/Lane?_??.fq.gz
+		where ? are:
+			lane
+			index
+	Output:
+		scratch_out_dir/tophat_lane?_index?? (directory)
+		where ? are:
+			lane
+			index
+4- htseq-count
+	Generates feature-level read counts
+	Input:
+		scratch_out_dir/tophat_lane?_index??/accepted_hits.bam
+		where ? are:
+			lane
+			index
+	Output:
+		analysis_out_dir/?_??.htseq
+		where ? are:
+			lane
+			index
+5- PicardTools CollectRNASeqMetrics
+	Generates alignment metrics
+	Input:
+		scratch_out_dir/tophat_lane?_index??/accepted_hits.bam
+		where ? are:
+			lane
+			index
+	Output:
+		analysis_out_dir/?_??_bam.metrics
+		analysis_out_dir/?_??_bam.pdf
+6- overlaps.R
+	Counts read overlaps by feature type (5UTR, 3UTR, exon, intron)
+	Input:
+		scratch_out_dir/tophat_lane?_index??/accepted_hits.bam
+		where ? are:
+			lane
+			index
+	Output:
+		analysis_out_dir/?_??.roverlaps
+		where ? are:
+			lane
+			index
+7- FastQC
+	Generates RNAseq library diagnostics
+	Input:
+		scratch_out_dir/tophat_lane?_index??/accepted_hits.bam
+		where ? are:
+			lane
+			index
+	Output:
+		analysis_out_dir/?_??_fastqc/mapped (directory)
+			Analysis of only mapped reads
+		analysis_out_dir/?_??_fastqc/all (directory)
+			Analysis of all reads
+
+
+
+
+Options:
+	h	Display this message and exit
+Requirements:
+	Scripts: mergeQindexbyIndex.sh, qindexToFQ.sh
+Input:
+	Directory of demultiplexed qseq files in SCRATCH of format
+		Run_lane_indices_demultiplex
+
+Output:
+	Dir in SCRATCH / Run_lane_indices_qindex
+
+Michael Chambers, 2013
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+if [ $# -lt 3 ]; then
+	echo "$USAGE" >&2
+	exit 65
+fi
+### Uncomment for production runs ###
+source ~/.bashrc
+###
+
+### Uncomment for testing/benchmark runs ###
+# source ../TMPsetupEnv.sh
+# export SCRATCH=scratch
+###
+
+BT2_INDEX=~/dm3_igenome_bowtie2index/genome
+ANNO=~/FlyBase/Drosophila_melanogaster.BDGP5.72.mod1.gtf
+TOPHAT_ANNO=~/FlyBase/igenome.gtf
+
+IN_DIR=$1
+SCRATCH_OUT_DIR=$2
+ANALYSIS_DIR=$3
+LANE=$4
+SINGLE_INDEX=$5
+
+IN_DIR_BASE=`basename $IN_DIR`
+if [ ! -d $IN_DIR ]; then
+	echo "@@@ERROR ${0}: Could not find ${IN_DIR}" `date` >&2
+	exit 1
+fi
+
+## Convert merged qindex file to fastq in OUT_DIR
+# Requires mergeQindexbyIndex.sh and qindexToFq.sh to be in path
+if [ ! -d $SCRATCH_OUT_DIR ]; then mkdir $SCRATCH_OUT_DIR; fi
+if [ -e ${SCRATCH_OUT_DIR}/Lane${LANE}_${SINGLE_INDEX}.fq.gz ]; then
+	echo "@@@ WARNING ${0}: Merged fq already exists... skipping" $(date) >&2
+else
+	echo "@@@ LOG ${0}: Beginning merger of " $(basename $IN_DIR) " for index $SINGLE_INDEX" $(date) >&2
+	mergeQindexbyIndex.sh -o $SCRATCH_OUT_DIR -i $SINGLE_INDEX $IN_DIR Lane${LANE}
+	echo "@@@ LOG ${0}: Generating file Lane${LANE}_${SINGLE_INDEX}.fq.gz in dir $SCRATCH_OUT_DIR" >&2
+	qindexToFQ.sh -c ${SCRATCH_OUT_DIR}/Lane${LANE}_${SINGLE_INDEX}_qindex.txt.gz $SCRATCH_OUT_DIR
+fi
+
+# Perform tophat alignment; attempt resume if tophat output directory exists
+# Requires tophat and samtools to be in path
+TOPHAT_OUT=${SCRATCH_OUT_DIR}/tophat_lane${LANE}_index${SINGLE_INDEX}
+if [ -d $TOPHAT_OUT ]; then
+	echo "@@@ WARNING ${0}: Tophat output directory $TOPHAT_OUT exists... attempting resume..." $(date) >&2
+	tophat -R $TOPHAT_OUT;
+else
+	echo "@@@ LOG ${0}: Beginning tophat alignment with BT2_INDEX $BT2_INDEX"
+	tophat -p 4 -o $TOPHAT_OUT -G $TOPHAT_ANNO $BT2_INDEX ${SCRATCH_OUT_DIR}/Lane${LANE}_${SINGLE_INDEX}.fq.gz
+fi
+
+# Generate feature-level counts using HTSeq htseq-count script
+# Requires htseq-count and samtools to be in PATH
+htseq_out=${ANALYSIS_DIR}/${LANE}_${SINGLE_INDEX}.htseq
+if [ -e $htseq_out ]; then
+	echo "@@@ WARNING ${0}: HTSeq output file $htseq_out exists... skipping... " $(date) >&2
+else
+	echo "@@@ LOG ${0}: Starting HTSeq gene feature count... " $(date) >&2
+	samtools view ${TOPHAT_OUT}/accepted_hits.bam | htseq-count -s no - $ANNO > $ANALYSIS_DIR/${LANE}_${SINGLE_INDEX}.htseq
+fi
+
+# Run Picard Tools CollectRNASeqMetrics through picard_metrics.sh script
+picard_out=${ANALYSIS_DIR}/${LANE}_${SINGLE_INDEX}_bam.metrics
+if [ -e $picard_out ]; then
+	echo "@@@ WARNING ${0}: Picard output file $picard_out exists... skipping..." $(date) >&2
+else
+	echo "@@@ LOG ${0}: Starting Picard RNASeq metrics... " $(date) >&2
+	picard_metrics.sh ${TOPHAT_OUT}/accepted_hits.bam $LANE $SINGLE_INDEX $ANALYSIS_DIR
+fi
+
+# Run overlaps.R
+# Requires Rscript to be in path, and overlaps.R to be in ~/bin
+roverlaps_out=${ANALYSIS_DIR}/${LANE}_${SINGLE_INDEX}.roverlaps
+if [ -e $roverlaps_out ]; then
+	echo "@@@ WARNING ${0}: ROverlaps out file exists... skipping..." $(date) >&2
+else
+	echo "@@@ LOG ${0}: Beginning ROverlaps to output file $roverlaps_out..." $(date) >&2
+	Rscript ~/bin/overlaps.R ${TOPHAT_OUT}/accepted_hits.bam $roverlaps_out
+fi
+
+# Run FastQC on aligned BAM file
+# Requires fastQC to be in path
+fastqc_out=${ANALYSIS_DIR}/${LANE}_${SINGLE_INDEX}_fastqc
+for d in {fq,mapped,all}; do
+	mkdir $fastqc_out 2> /dev/null
+	if [ -d $fastqc_out/$d ]; then
+		echo "@@@ WARNING ${0}: FastQC output directory $fastqc_out/$d exists... skipping..." $(date) >&2
+	else
+		case $d in
+			fq)
+				mkdir $fastqc_out/fq
+				fastq -o ${fastqc_out}/fq -f fastq ${SCRATCH_OUT_DIR}/Lane${LANE}_${SINGLE_INDEX}.fq.gz
+				;;
+			mapped)
+				mkdir ${fastqc_out}/mapped
+				fastqc -o ${fastqc_out}/mapped -f bam_mapped ${TOPHAT_OUT}/accepted_hits.bam
+				;;
+			all)
+				mkdir ${fastqc_out}/all
+				fastqc -o ${fastqc_out}/all -f bam ${TOPHAT_OUT}/accepted_hits.bam
+				;;
+		esac
+	fi
+done
+
+echo "@@@ LOG ${0}: Done " $(date) >&2
+
+
+

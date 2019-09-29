@@ -1,0 +1,355 @@
+#!/usr/bin/env perl
+# use lib "/u/home/m/mchamber/.perl/lib64/perl5";
+use strict;
+use warnings;
+use Getopt::Std;
+use PerlIO::gzip;
+use Carp::Assert;
+
+my $USAGE ='
+Usage: demultiplex_qseq_dir  [ -hcq -n number -t index_type] indices input_dir output_dir
+
+Splits <qseq> files by index into multiple output files.
+Indices must be given as comma-separated string.
+
+Options:
+	h       Display this message and exit
+	c       Compess the output with gzip
+	n       Optional; number of reads to process per index (for sampling)
+	t       Type of indices numbers used for library prep. Valid options are Illumina and NuGEN. Defaults to Illumina
+
+Michael Chambers, 2014
+';
+
+our($opt_h, $opt_c, $opt_n, $opt_t);
+# Set default
+$opt_t="Illumina";
+
+getopts('hcn:t:');
+&usage if($opt_h);
+&usage if($#ARGV < 2);
+
+my ($indices, $indir, $outdir) = @ARGV;
+
+# Open directory and get read 1 and read 2 files
+opendir(INDIR, $indir) or die "Could not open directory $indir\n";
+my @files = readdir(INDIR);
+my @read1_files = grep(/^s_._1/, @files);
+my @read2_files = grep(/^s_._2/, @files);
+
+# Should be the same number of read 1 & 2 files
+should($#read1_files, $#read2_files) if DEBUG;
+
+# Check if data if paired-end i.e. read 3 files exist
+my $paired = 0;
+my @read3_files = grep(/^s_._3/, @files);
+if($#read3_files >= 0){
+	# Paired files are in dir -> set flag and assert same num of files as read 1
+	print STDERR "@@@ LOG: Found read 3 files, assuming input data is paired...\n";
+	$paired = 1;
+	should($#read3_files, $#read1_files ) if DEBUG;
+}
+
+# Get lane number
+my $lane = substr($read1_files[0], 2, 1);
+
+# Make output directory if it doesn't exist
+mkdir $outdir or die "Could not make directory $outdir...\n" unless( -d $outdir );
+
+#Generate a hash of associated adapter sequences and ID numbers
+my %ILLUMINA_NUMS = qw(
+	1 ATCACG 2 CGATGT 3 TTAGGC 4 TGACCA 5 ACAGTG
+	6 GCCAAT 7 CAGATC 8 ACTTGA 9 GATCAG
+	01 ATCACG 02 CGATGT 03 TTAGGC 04 TGACCA 05 ACAGTG
+	06 GCCAAT 07 CAGATC 08 ACTTGA 09 GATCAG 10 TAGCTT
+	11 GGCTAC 12 CTTGTA 13 AGTCAA 14 AGTTCC 15 ATGTCA
+	16 CCGTCC 17 GTAGAG 18 GTCCGC 19 GTGAAA 20 GTGGCC
+	21 GTTTCG 22 CGTACG 23 GAGTGG 24 GGTAGC 25 ACTGAT
+	26 ATGAGC 27 ATTCCT 28 CAAAAG 29 CAACTA 30 CACCGG
+	31 CACGAT 32 CACTCA 33 CAGGCG 34 CATGGC 35 CATTTT
+	36 CCAACA 37 CGGAAT 38 CTAGCT 39 CTATAC 40 CTCAGA
+	41 GACGAC 42 TAATCG 43 TACAGC 44 TATAAT 45 TCATTC
+	46 TCCCGA 47 TCGAAG 48 TCGGCA);
+
+my %NUGEN_NUMS = qw(
+	1	AACCAG
+	2	TGGTGA
+	3	AGTGAG
+	4	GCACTA
+	5	ACCTCA
+	6	GTGCTT
+	7	AAGCCT
+	8	GTCGTA );
+
+
+# Get list of indices to split over
+my @input_indices = split(/,/, $indices);
+
+my %INDEXNUMS;
+if($opt_t eq "Illumina"){
+	@INDEXNUMS{@input_indices} = @ILLUMINA_NUMS{@input_indices};
+} elsif ($opt_t eq "NuGEN"){
+	@INDEXNUMS{@input_indices} = @NUGEN_NUMS{@input_indices};
+} else {
+	print STDERR "Library type $opt_t unknown!\n";
+	&usage;
+}
+
+# Demultiplex!
+demultiplexByCode(@input_indices);
+
+# Given a list of index codes, splits the input file into multiple output files, one per index
+sub demultiplexByCode{
+	if ( $paired)  {
+		demultiplexByCodePaired(@input_indices);
+	} else {
+		my @codes = @_;
+
+		#Determine filenames for output, and open filehandles
+		#Logging
+		my $total_files= $#read1_files + 1;
+		print STDERR "@@@ Splitting $total_files from dir $indir into " .  ($#codes + 1) . " files using adapters ";
+		print STDERR "$_, " for @codes;
+		print STDERR "...\n";
+		print STDERR "Outputing $opt_n lines for each adaptor...\n" if $opt_n;
+
+		#Open files for output
+		my %read1_filehandles;
+		my %read2_filehandles;
+		my @outnames = ();
+
+		# Open two output files for each index and 00
+		for my $i (@codes, "00"){
+			my $read1_output = sprintf "s_%s_1_%.2d_qseq.txt", $lane, $i;
+			my $read2_output = sprintf "s_%s_2_%.2d_qseq.txt", $lane, $i;
+			open my $fh1, ">", $outdir . "/" . $read1_output or die "Could not open ${outdir}/$read1_output for writing...\n";
+			open my $fh2, ">", $outdir . "/" . $read2_output or die "Could not open ${outdir}/$read2_output for writing...\n";
+			$read1_filehandles{$i} = $fh1;
+			$read2_filehandles{$i} = $fh2;
+		}
+
+		#Generate mismatches for each sequence
+		my %mismatches;
+		print STDERR "@@@ LOG: Matching with 1 mismatch...\n";
+		for (@codes){
+			$mismatches{$_} = generateMismatch($INDEXNUMS{$_});
+		}
+
+		# Counts for reads split into each file
+		my %index_totals;
+		$index_totals{$_} = 0 for(@codes);
+
+		# my @full_codes = ();
+
+		#Open QINDEX file for input, and write lines to output files based on adapter sequence (col 2)
+		for(my $i = 0; $i <= $#read1_files; $i++){
+			open READ1, "<:gzip", $indir . "/" . $read1_files[$i] or die "Could not open file $read1_files[$i]...\n";
+			open READ2, "<:gzip", $indir . "/" . $read2_files[$i] or die "Could not open file $read2_files[$i]...\n";
+			while(defined(my $read1 = <READ1>) && defined(my $read2 = <READ2>)){
+				chomp($read1);
+				chomp($read2);
+				my $curr_index = (split /\t/, $read2)[8];
+
+				# Cut index to first six characters
+				$curr_index = substr($curr_index, 0, 6);
+
+				my $matched = 0;
+				for my $i (@codes){
+					last if $matched;
+					for my $s (@{$mismatches{$i}}){
+						if( $curr_index =~ $s){
+							$matched = 1;
+							next if($opt_n && $index_totals{$i} >= $opt_n);
+							$index_totals{$i}++;
+							print { $read1_filehandles{$i} } $read1 . "\n";
+							print { $read2_filehandles{$i} } $read2 . "\n";
+							last;
+						}
+					}
+				}
+				unless($matched){
+					print { $read1_filehandles{"00"} } $read1 . "\n";
+					print { $read2_filehandles{"00"} } $read2 . "\n";
+				}
+
+
+			}
+
+			# If only sampling check if done and remove indices that are complete
+			if($opt_n){
+				my $finished = 1;
+				for(my $i = 0; $i <= $#codes; $i++){
+					# Have not found enough
+					if($index_totals{$codes[$i]} < $opt_n){
+						$finished = 0;
+					# Else, have found enough so remove code from search array and decrement $i
+					}
+				}
+				last if($finished);
+			}
+		}
+
+		#Close filehandles
+		for my $i (keys %read1_filehandles){
+			close $read1_filehandles{$i};
+		}
+		for my $i (keys %read2_filehandles){
+			close $read2_filehandles{$i};
+		}
+		if($opt_c){
+			for my $o (@outnames){
+				system("gzip", "-f", "--best", $o);
+			}
+		}
+	}
+}
+
+# Given a list of adaptor sequences, splits the input file into multiple output files, one per index (paired read version)
+sub demultiplexByCodePaired{
+	my @codes = @_;
+
+	#Determine filenames for output, and open filehandles
+	#Logging
+	my $total_files= $#read1_files + 1;
+	print STDERR "@@@ Splitting $total_files from dir $indir into " .  ($#codes + 1) . " files using adapters ";
+	print STDERR "$_, " for @codes;
+	print STDERR "...\n";
+	print STDERR "Outputing $opt_n lines for each adaptor...\n" if $opt_n;
+
+	#Open files for output
+	my %read1_filehandles;
+	my %read2_filehandles;
+	my %read3_filehandles;
+	my @outnames = ();
+
+	# Open two output files for each index and 00
+	for my $i (@codes, "00"){
+		my $read1_output = sprintf "s_%s_1_%.2d_qseq.txt", $lane, $i;
+		my $read2_output = sprintf "s_%s_2_%.2d_qseq.txt", $lane, $i;
+		my $read3_output = sprintf "s_%s_3_%.2d_qseq.txt", $lane, $i;
+		open my $fh1, ">", $outdir . "/" . $read1_output or die "Could not open ${outdir}/$read1_output for writing...\n";
+		open my $fh2, ">", $outdir . "/" . $read2_output or die "Could not open ${outdir}/$read2_output for writing...\n";
+		open my $fh3, ">", $outdir . "/" . $read3_output or die "Could not open ${outdir}/$read3_output for writing...\n";
+		$read1_filehandles{$i} = $fh1;
+		$read2_filehandles{$i} = $fh2;
+		$read3_filehandles{$i} = $fh3;
+	}
+
+	#Generate mismatches for each sequence
+	my %mismatches;
+	print STDERR "@@@ LOG: Matching with 1 mismatch...\n";
+	for (@codes){
+		$mismatches{$_} = generateMismatch($INDEXNUMS{$_});
+	}
+
+	# Counts for reads split into each file
+	my %index_totals;
+	$index_totals{$_} = 0 for(@codes);
+
+	# my @full_codes = ();
+
+	#Open QINDEX file for input, and write lines to output files based on adapter sequence (col 2)
+	for(my $i = 0; $i <= $#read1_files; $i++){
+		open READ1, "<:gzip", $indir . "/" . $read1_files[$i] or die "Could not open file $read1_files[$i]...\n";
+		open READ2, "<:gzip", $indir . "/" . $read2_files[$i] or die "Could not open file $read2_files[$i]...\n";
+		open READ3, "<:gzip", $indir . "/" . $read3_files[$i] or die "Could not open file $read3_files[$i]...\n";
+		while(defined(my $read1 = <READ1>) && defined(my $read2 = <READ2>) && defined( my $read3 = <READ3>)){
+			chomp($read1);
+			chomp($read2);
+			chomp($read3);
+			my $curr_index = (split /\t/, $read2)[8];
+
+			# Cut index to first six characters
+			$curr_index = substr($curr_index, 0, 6);
+
+			my $matched = 0;
+			for my $i (@codes){
+				last if $matched;
+				for my $s (@{$mismatches{$i}}){
+					if( $curr_index =~ $s){
+						$matched = 1;
+						next if($opt_n && $index_totals{$i} >= $opt_n);
+						$index_totals{$i}++;
+						print { $read1_filehandles{$i} } $read1 . "\n";
+						print { $read2_filehandles{$i} } $read2 . "\n";
+						print { $read3_filehandles{$i} } $read3 . "\n";
+						last;
+					}
+				}
+			}
+			unless($matched){
+				print { $read1_filehandles{"00"} } $read1 . "\n";
+				print { $read2_filehandles{"00"} } $read2 . "\n";
+				print { $read3_filehandles{"00"} } $read3 . "\n";
+			}
+
+
+		}
+
+		# If only sampling check if done and remove indices that are complete
+		if($opt_n){
+			my $finished = 1;
+			for(my $i = 0; $i <= $#codes; $i++){
+				# Have not found enough
+				if($index_totals{$codes[$i]} < $opt_n){
+					$finished = 0;
+				# Else, have found enough so remove code from search array and decrement $i
+				}
+			}
+			last if($finished);
+		}
+	}
+
+	#Close filehandles
+	for my $i (keys %read1_filehandles){
+		close $read1_filehandles{$i};
+	}
+	for my $i (keys %read2_filehandles){
+		close $read2_filehandles{$i};
+	}
+	for my $i (keys %read3_filehandles){
+		close $read3_filehandles{$i};
+	}
+	if($opt_c){
+		for my $o (@outnames){
+			system("gzip", "-f", "--best", $o);
+		}
+	}
+}
+
+###
+# Removed as not useful
+# Given a list of adaptor sequences, splits the input file into multiple output files, one per index
+# sub demultiplexByAdaptorSeq{
+# 	my @indices = @_;
+# 	my @codes = ();
+# 	for my $i (@indices){
+# 		push @codes, $REV_INDEX{$i};
+# 	}
+# 	if ( $paired ) {
+# 		demultiplexByCodePaired(@codes);
+# 	} else {
+# 		demultiplexByCode(@codes);
+# 	}
+# }
+###
+
+#Given a string, returns an array of every string with a . in each position
+sub generateMismatch{
+	my $seq= shift;
+
+	my @patterns;
+	for(my $i = 0; $i < length($seq); $i++){
+		my $mm = $seq;
+		substr($mm, $i, 1 ) = ".";
+		push @patterns, $mm
+	}
+	# print "Returning for $seq:\n";
+	# print "$_\n" for @patterns;
+	return \@patterns;
+}
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

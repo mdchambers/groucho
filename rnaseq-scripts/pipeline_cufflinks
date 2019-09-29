@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_cufflinks [ -h ] output_dir input_sam1 [ input_sam2 [ ... ] ]
+
+A simple cufflinks pipeline
+
+Michael Chambers, 2014
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+for sam in $@; do
+	cuff_out=cufflinks_$( basename $sam .sam )
+	cufflinks -o $cuff_out
+

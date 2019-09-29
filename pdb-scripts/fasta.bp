@@ -1,0 +1,17 @@
+#!/bin/bash
+
+count_n=true
+while getopts "n" opt; do
+	case $opt in
+		n)
+		 count_n=false
+		 ;;
+	esac
+done
+shift $((OPTIND-1))
+x=$1
+if $count_n; then
+	cat $x | grep -v "^>" | tr -d "\n" | wc -m | chomp
+else
+	cat $x | grep -v "^>" | tr -d "Nn\n" | wc -m | chomp
+fi

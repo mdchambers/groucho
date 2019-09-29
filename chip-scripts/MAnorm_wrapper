@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: MAnorm_wrapper [ -hq ] output_dir peaks1.bed peaks2.bed reads1.bed reads2.bed distance1 distance2
+
+Peaks files should be MACS2 output.
+Reads files should be made using bamToBed
+	Should probably be sorted but maybe not necessary
+
+A simple wrapper for MAnorm.
+
+Michael Chambers, 2014
+'
+. ~/setup.sh
+
+queue=false
+while getopts "hq" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		q)
+			echo "Job will be queued" >&2
+			queue=true
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( $OPTIND - 1 ))
+if [ $# -ne 7 ]; then echo "$USAGE" >&2; exit 2; fi
+
+
+outdir=$1
+peaks1=$2
+peaks2=$3
+reads1=$4
+reads2=$5
+d1=$6
+d2=$7
+
+# Make output directory if doesn't exist
+[ -d $outdir ] || mkdir $outdir;
+
+# Check all input files exist
+for f in $peaks1 $peaks2 $reads1 $reads2; do
+	if [ ! -e $f ]; then
+		echo "File $f not found! Exiting..." >&2
+		exit 1;
+	fi
+done
+
+cd $outdir
+echo "@@@ LOG: Processing $peaks1" `date` >&2
+cut -f -3 $peaks1 > peaks1.bed
+echo "@@@ LOG: Processing $peaks2" `date` >&2
+cut -f -3 $peaks2 > peaks2.bed
+echo "@@@ LOG: Processing $reads1" `date` >&2
+cut -f 1,2,3,6 $reads1 > reads1.bed
+echo "@@@ LOG: Processing $reads2" `date` >&2
+cut -f 1,2,3,6 $reads2 > reads2.bed
+
+if [ "$queue" = true ]; then
+	cmd="qsub -l h_rt=8:00:00,h_data=4G -cwd -b y \"~/bin/MAnorm_hoffman.sh peaks1.bed peaks2.bed reads1.bed reads2.bed $d1 $d2\""
+else
+	cmd="MAnorm_hoffman.sh peaks1.bed peaks2.bed reads1.bed reads2.bed $d1 $d2"
+fi
+echo "@@@ LOG: Calling $cmd" >&2
+$cmd
+echo "@@@ Removing intermediate files" `date` >&2
+rm peaks1.bed peaks2.bed reads1.bed reads2.bed
+cd -
+
+echo "@@@ LOG: DONE!" >&2

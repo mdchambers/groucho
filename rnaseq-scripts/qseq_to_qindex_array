@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: qseqToQindex_array.sh [ -hc ] qseq_directory output_directory
+
+Options:
+
+	-c	Compress (gzip) output file
+
+Michael Chambers, 2012
+'
+
+GZIP=0
+while getopts "h" opt; do
+	case $opt in
+		c)
+			GZIP=1
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( OPTIND - 1 ))
+
+if [ $# -ne 2 ]; then
+	echo $USAGE
+	exit 1
+fi
+
+DIR=$1
+OUTDIR=$2
+#SGE_TASK_ID=$1
+LANE=${DIR: -1}
+
+tile=0
+if [ $SGE_TASK_ID -lt 17 ]; then
+	tile=$(( 1100 + $SGE_TASK_ID ))
+elif [ $SGE_TASK_ID -lt 33 ]; then
+	tile=$(( 1200 + $SGE_TASK_ID - 16 ))
+elif [ $SGE_TASK_ID -lt 49 ]; then
+	tile=$(( 1300 + $SGE_TASK_ID - 32 ))		
+elif [ $SGE_TASK_ID -lt 65 ]; then
+	tile=$(( 2100 + $SGE_TASK_ID - 48 ))
+elif [ $SGE_TASK_ID -lt 81 ]; then
+	tile=$(( 2200 + $SGE_TASK_ID - 64 ))
+elif [ $SGE_TASK_ID -lt 97 ]; then
+	tile=$(( 2300 + $SGE_TASK_ID - 80 ))
+else
+	exit 1
+fi
+
+QREAD=${DIR}/s_${LANE}_1_${tile}_qseq.txt.gz
+QINDEX=${DIR}/s_${LANE}_2_${tile}_qseq.txt.gz
+OUT=${OUTDIR}/s_${LANE}_1_${tile}_qindex.txt
+
+echo "@@@ Converting ${QREAD} to ${OUT} ... " `date` >&2
+if [ ! -e ${QREAD} ]; then
+	echo "Cannot find end 1 file $QREAD" >&2
+	exit 1
+fi
+if [ ! -e ${QINDEX} ]; then
+	echo "Cannot find end 2 file $QINDEX!" >&2
+	exit 1
+fi
+
+if [ ! -d $OUTDIR ]; then
+	mkdir $OUTDIR
+fi
+
+echo '@@@' "Writing to $OUT..." `date` >&2
+paste <(zcat $QREAD | cut -f 9 | tr . N) \
+	  <(zcat $QINDEX | cut -f 9 | tr . N) \
+	  <(zcat $QREAD | cut -f 10) \
+	  <(zcat $QINDEX | cut -f 10,11) > $OUT
+
+if [ $GZIP -eq 1 ]; then
+	gzip --best $OUT
+fi
+echo "Done" `date` >&2

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# A tophat wrapper
+#
+# Michael Chambers, 2014
+
+# Initialize Hoffman environment
+source /u/local/Modules/default/init/modules.sh
+module load java/1.7.0_45
+module load samtools
+module load bowtie2
+module load tophat
+module load perl
+source ~/setup.sh
+
+tophat $@

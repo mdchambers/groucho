@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: demultiplexQINDEX_directory.sh [ -h ] indices input_dir output_dir
+OPERATES ON A DIRECTORY; NOT PARALLELIZED
+
+Uses the script demultiplexQINDEX.pl to demultiplex a complete directory
+Demultiplexes a directory of qindex files by given indices.
+
+Indices should be given as a comma-seperated list.
+
+Ex.
+
+Input directory is Lane2INDEX, containing multiple qindex files of the form:
+
+s_2_1_xxxx_qindex.txt.gz
+
+Data is indexed with 1, 3, 8, and 9 adapters. 
+
+The output would consist of five directories:
+
+Lane2_1 Lane2_3 Lane2_8 Lane2_9 Lane2_0
+
+In each directory will be several qindex files (one per tile) of the form
+
+Lane2_1
+
+s_2_1_xxxx_1_qindex.txt.gz
+etc.
+
+containing only those indexed reads.
+
+An additional directory, Lane2_0 is created with unmatched reads.
+
+Michael Chambers, 2013
+'
+#PATH=${PATH}:.
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+if [ $# -lt 2 ]; then
+	echo "Need two arguments!"
+	echo "$USAGE";
+	exit 1;
+fi
+
+indices=$1
+input_dir=$2
+input_base=`basename $input_dir`
+lane=${input_base:4:1}
+
+for x in ${input_dir}/s_?_1_????_qindex.txt.gz; do
+	gunzip -c $x > ${x%.gz}
+	demultiplexQINDEX.pl -nc -i $indices ${x%.gz}
+	rm ${x%.gz}
+done
+
+indarray=(${indices//,/ })
+for i in ${indarray[@]} N; do
+	output_dir=Lane${lane}_${i}
+	if [ -d $output_dir ]; then
+		exit 1;
+	fi
+	mkdir $output_dir
+	mv s_${lane}_?_????_${i}_qindex.txt.gz $output_dir
+done
+
+
+

@@ -1,0 +1,40 @@
+#!/bin/bash
+USAGE='fasta.concact 1.0 Copyright (C) Michael Chambers
+
+Concacts fastas or naked DNA sequences into a multi-sequence fasta.  If the program detects that the input files are not fastas, it generates fasta files for them from the file name of each file.
+
+USAGE: fasta.concact [ -f | -h ] file(s)
+
+OPTIONS
+
+	-h Displays this message and exits
+	-f Forces abandoning current fasta names and renames based on file names
+	'
+
+force_rename=false
+
+while getopts "fh" opt; do
+	case $opt in
+		f)
+		 force_rename=true
+		 ;;
+		h)
+		 echo "$USAGE"
+		 exit
+		 ;;
+	esac
+done
+shift $((OPTIND-1))
+for x in $@; do
+	named=`grep "^>" $x | wc -l | chomp`
+	if [ $named -eq 0 ]; then
+		force_rename=true
+	fi
+	if $force_rename; then
+		echo -n ">"
+		echo $x
+		grep -v "^>" $x
+	else
+		cat $x
+	fi
+done

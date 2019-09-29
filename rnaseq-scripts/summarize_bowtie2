@@ -1,0 +1,62 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+my $USAGE ='
+Usage:   -h bowtie2_output1 [ bowtie2_output2 ... ]
+
+Summarizes bowtie
+
+Filename
+Reads
+Unpaired
+Not Aligned
+Uniquely Aligned
+Multiply Aligned
+Overall Alignment Rate
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+#&usage if($#ARGV < 0);
+
+my @files = @ARGV;
+
+my $header= "Filename\tReads\tUnpaired\tUnaligned\tUniqueAligned\tMultipleAligned\tOverallAlignmentRate\n";
+
+print $header;
+
+for my $f (@files){
+	open FILE, "< $f";
+	my $filename = `basename $f`;
+	chomp $filename;
+	my $reads = 0;
+	my $unpaired = 0;
+	my $unaligned = 0;
+	my $unique = 0;
+	my $multiple = 0;
+	my $rate = 0;
+
+	my $line = 0;
+	while(<FILE>){
+		next if /\.bashrc/;
+		$line++;
+		my @l = split;
+		$reads = $l[0] if $line == 1;
+		$unpaired = $l[0] if $line == 2;
+		$unaligned = $l[0] if $line == 3;
+		$unique = $l[0] if $line == 4;
+		$multiple = $l[0] if $line == 5;
+		$rate = $l[0] if $line == 6;
+	}
+	close FILE;
+	print "$filename\t$reads\t$unpaired\t$unaligned\t$unique\t$multiple\t$rate\n";
+}
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

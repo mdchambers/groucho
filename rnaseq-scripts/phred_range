@@ -1,0 +1,54 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+my $USAGE ='
+Usage: phred_range  -h
+
+Returns the hypothetical phred quality range and type given a qseq file
+Crudely attempts to determine if the input is qseq or fastq file
+Giving it something else will probably produce gibberish and/or errors
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+
+my $min = 1000;
+my $max = 0;
+my $isQual = 0;
+while(<>){
+    chomp;
+    my @line = split;
+    # Crude test to see if qseq file or fastq
+  	my ($phred, @p);
+    if($#line > 1){ #then qseq file
+    	$phred = $line[9];
+    } else {
+    	if( $isQual){
+    		$isQual = 0;
+    		$phred = $line[0];
+    	} else {
+    		$isQual = 1 if( /^\+$/ );
+    		next;
+    	}
+    }
+    @p = split(//,$phred);
+    @p = sort @p;
+    $min = ord($p[0]) if $min > ord($p[0]);
+    $max = ord($p[$#p]) if $max < ord($p[$#p]);
+}
+if($max == 0 || $min == 1000){
+    print "Something went wrong!\n";
+    exit 2;
+}
+print "RANGE: $min to $max\n";
+print "ASCII RANGE: " . chr($min) . " to " . chr($max) . "\n";
+
+
+sub usage{
+    print STDERR $USAGE;
+    exit 2;
+}

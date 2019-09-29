@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+use PerlIO::gzip;
+use POSIX qw(ceil);
+
+my $USAGE ='
+Usage: sample_qseq.pl  -h num dir out_prefix
+
+Pulls a sample of lines from paired qseq files.
+Should pull from every file but is probably slightly biased towards the beginning of each.
+The effect of this bias is larger when num is small.
+
+Options:
+    -h Display this message and exit.
+Arguments:
+    num         Number of reads to sample
+    dir         Directory containing qseq files
+    out_prefix  Prefix of output files
+Input:
+    Standars qseq files, in pairs (read and adapter index)
+Output:
+    Two files of form
+        prefix_1_qseq.txt   sample reads
+        prefix_2_qseq.txt   index reads
+
+
+TODO: Make this true uniform random without making it take forever
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+&usage if($#ARGV < 2);
+
+my ($number, $dir, $out_prefix) = @ARGV;
+my $out_s1 = "${out_prefix}_1.qseq";
+my $out_s2 = "${out_prefix}_2.qseq";
+
+print STDERR "Grabbing $number lines from directory $dir into files $out_s1 and $out_s2\n";
+
+opendir(MYDIR, $dir) or die "Could not find dir $dir\nExiting";
+
+my @files = readdir(MYDIR);
+my @s1_files = grep(/^s_._1/,@files);
+# my @file_lengths = &getFileLengths(@s1_files);
+
+my @s2_files = grep(/^s_._2/,@files);
+
+closedir(MYDIR);
+
+open OUT_S1, "> ${out_prefix}_1_qseq.txt";
+open OUT_S2, "> ${out_prefix}_2_qseq.txt";
+open LINENUM, "> ${out_prefix}.linenumbers";
+
+my $num_files = $#s1_files;
+print STDERR "Found $num_files to pull from\n";
+
+my $num_per_file = ceil($number / $#s1_files);
+my $total = 0;
+
+LOOP:
+for(my $i = 0; $i <= $#s1_files; $i++){
+    open S1, "<:gzip", "$dir/" . $s1_files[$i] or die "Could not open $s1_files[$i]\nExiting...";
+    my $len = 0;
+    $len++ while(<S1>);
+    close S1;
+    open S1, "<:gzip", "$dir/" . $s1_files[$i] or die "Could not open $s1_files[$i]\nExiting...";
+    my $cutoff = 1 - $num_per_file / $len;
+    open S2, "<:gzip", "$dir/" . $s2_files[$i] or die "Could not open $s2_files[$i]\nExiting...";
+    my $curr = 0;
+    my $linenum = 0;
+    my $x = <S1>;
+    my $y = <S2>;
+    print "Doing file $i of $#s1_files with cutoff $cutoff\n";
+    # while((defined(my $l1 = <S1>)) && (defined(my $l2 = <S2>))){
+    while((my $l1 = <S1>) && (my $l2 = <S2>)){
+        $linenum++;
+        if( rand() >= $cutoff ){
+            print OUT_S1 $l1;
+            print OUT_S2 $l2;
+            $curr++;
+            $total++;
+            print LINENUM "$total\t$linenum\n";
+        }
+        last if $curr >= $num_per_file;
+        last if $total >= $number;
+    }
+    close S1;
+    close S2;
+    last if $total >= $number
+}
+
+# Startover if not enough lines pulled
+goto "LOOP" if($total < $number);

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: count_PF [ -h ] qseq_file
+
+Outputs number of good passing, failing, and total PF values from a qseq file
+Outputs as three columns corresponding to the above values.
+
+Michael Chambers, 2013
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+if [ $# -eq 0 ]; then echo $USAGE; exit 1; fi
+
+QSEQ=$1
+
+if [[ $QSEQ =~ gz ]]; then
+	CMD=zcat
+else
+	CMD=cat
+fi
+
+$CMD $QSEQ | awk '{ if ($11 == 1)
+				{pass++}
+			else
+				{fail++}
+			{total++} }
+			END {print pass, fail, total}'
+

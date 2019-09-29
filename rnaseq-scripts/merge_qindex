@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: mergeQindex.sh [ -hr ] input_directory output_directory
+
+Merges all qindex files in a directory into one fq file
+
+Options:
+
+	-r	Recursive merge. Merge each subdirectory of input_directory seperately
+
+Michael Chambers, 2012
+'
+
+demulti=0
+while getopts "hr" opt; do
+	case $opt in
+		r)
+			demulti=1
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "@@@ ERROR: Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $((OPTIND - 1))
+in_dir=$1
+out_dir=$2
+
+if [ ! -d $dir ]; then
+	echo "@@@ ERROR: Could not find directory ${dir}..." `date` >&2
+	exit 1
+fi
+
+start_dir=`pwd`
+
+cd $in_dir
+
+if [ $demulti -eq 1 ]; then
+	for subdir in `ls -d */`; do
+		cd $subdir
+		echo "@@@ Merging qindex files in $base_subdir into $out_file" `date` >&2
+		cat *qindex.txt.gz
+		cd ..
+	done
+else
+	echo "@@@ Merging qindex files in $in_dir into $out_dir" `date` >&2
+	cat *qindex.txt.gz
+fi
+cd $start_dir
+
+

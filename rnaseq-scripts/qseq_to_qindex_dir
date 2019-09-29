@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: qseqToQindex.sh [ -h ] qseq_directory output_directory
+
+Converts a directory of qseq files to qindex files
+
+i.e. matching each sequence read with its appropriate index read
+
+Outputs to a file in 
+
+Michael Chambers, 2013
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+INDIR=$1
+OUTDIR=$2
+
+if [ $# -ne 2 ]; then
+	echo "@@@ Wrong number of inputs!" >&2
+	echo "USAGE" >&2
+	exit 1
+fi
+
+if [ ! -e $INDIR ]; then
+	echo "Cannot find lane directory $INDIR!"
+	exit 1;
+fi
+if [ ! -e $OUTDIR ]; then
+	mkdir $OUTDIR
+fi
+
+for QSEQ in $INDIR/s_?_1_????_qseq.txt.gz; do
+	QSEQBASE=`basename $QSEQ`
+	QINDEX=${INDIR}/${QSEQBASE:0:4}2${QSEQBASE:5}
+	if [ ! -e ${QSEQ} ]; then
+		echo "Cannot find end 1 file $QSEQ" >&2
+		exit 1
+	fi
+	if [ ! -e ${QINDEX} ]; then
+		echo "Cannot find end 2 file $QINDEX!" >&2
+		exit 1
+	fi
+	OUT=${OUTDIR}/${QSEQBASE//seq*}index.txt
+	echo '@@@' "Writing to $OUT..." `date`
+	paste <(zcat $QSEQ | cut -f 9 | tr . N) \
+		  <(zcat $QINDEX | cut -f 9 | tr . N) \
+		  <(zcat $QSEQ | cut -f 10) \
+		  <(zcat $QINDEX | cut -f 10,11) > $OUT
+	gzip $OUT
+	echo "Done" `date`
+done

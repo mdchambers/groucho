@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: qseqToQindex.sh [ -hc ] qseq_reads qseq_index
+
+Makes a qindex file from two qseq files. Writes to STDOUT
+
+Options:
+
+	-c	Compress (gzip) output file
+
+Michael Chambers, 2012
+'
+
+GZIP=0
+while getopts "h" opt; do
+	case $opt in
+		c)
+			GZIP=1
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( OPTIND - 1 ))
+
+if [ $# -ne 2 ]; then
+	echo $USAGE
+	exit 1
+fi
+
+QREAD=$1
+QINDEX=$2
+
+echo "@@@ Pairing $QREAD and $QINDEX in qindex file ... " `date` >&2
+if [ ! -e ${QREAD} ]; then
+	echo "Cannot find end 1 file $QREAD" >&2
+	exit 1
+fi
+if [ ! -e ${QINDEX} ]; then
+	echo "Cannot find end 2 file $QINDEX!" >&2
+	exit 1
+fi
+
+if [ $GZIP -eq 1 ]; then
+paste <(zcat $QREAD | cut -f 9 | tr . N) \
+	  <(zcat $QINDEX | cut -f 9 | tr . N) \
+	  <(zcat $QREAD | cut -f 10) \
+	  <(zcat $QINDEX | cut -f 10,11) | gzip --best -f
+else
+	paste <(zcat $QREAD | cut -f 9 | tr . N) \
+	  <(zcat $QINDEX | cut -f 9 | tr . N) \
+	  <(zcat $QREAD | cut -f 10) \
+	  <(zcat $QINDEX | cut -f 10,11)
+fi
+
+echo "Done" `date` >&2

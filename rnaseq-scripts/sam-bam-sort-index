@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# 
+# Convert sam to bam, sort, and index
+# Michael Chambers, 2015
+
+sam=${1}
+
+source /u/local/Modules/default/init/modules.sh
+module load samtools
+
+base_sam=$( basename $sam .sam)
+dir_sam=$( dirname $sam )
+
+bam=${dir_sam}/${base_sam}.bam
+bam_sort_prefix=${dir_sam}/${base_sam}_sort
+bam_sort=${bam_sort_prefix}.bam
+
+echo $(date) samtools view -b -S $sam $bam >&2
+samtools view -b -S $sam > $bam
+
+echo $(date) samtools sort $bam $bam_sort_prefix >&2
+samtools sort $bam $bam_sort_prefix
+
+echo $(date) samtools index $bam_sort >&2
+samtools index $bam_sort

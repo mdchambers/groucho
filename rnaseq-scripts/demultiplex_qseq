@@ -1,0 +1,208 @@
+#!/usr/bin/env perl
+use lib "/u/home/m/mchamber/.perl/lib64/perl5";
+use strict;
+use warnings;
+use Getopt::Std;
+use PerlIO::gzip;
+my $USAGE ='
+Usage: demultiplex_qseq  [ -hc ] [ -t index_type ] [ -o output_dir ] indices qseq
+
+NOTE: Currently does not behave well with paired-end data
+
+Splits <qseq> file by index into multiple output files.
+Indices must be given as comma-separated string.
+
+Options:
+    h       Display this message and exit
+    c       Compess the output with gzip
+    t       Type of indices numbers used for library prep. Valid options are Illumina and NuGEN. Defaults to Illumina
+
+Michael Chambers, 2014
+';
+
+# Get options, exit if help flag or not two arguments
+our($opt_h, $opt_o, $opt_c, $opt_t);
+
+# Set default value for library type
+$opt_t = "Illumina";
+
+getopts('ho:ct:');
+&usage if($opt_h);
+&usage if($#ARGV < 1);
+
+# Assign arguments
+my ($indices, $qseq) = @ARGV;
+
+# Get lane, tile from filename. Assumes s_?_?_????_qseq.txt.gz is filename
+my $lane = substr($qseq, 2, 1);
+my $tile = substr($qseq, 6, 4);
+
+# Find qseq file corresponding to read1 file
+my $index_qseq = $qseq;
+substr($index_qseq, 4, 1) = 2;
+
+my $output_dir = ".";
+$output_dir = $opt_o if($opt_o);
+
+open QSEQ, "<:gzip", $qseq or die "Could not open $qseq\n";
+open QINDEX, "<:gzip", $index_qseq or die "Could not open $index_qseq\n";
+
+#Generate a hash of associated adapter sequences and ID numbers
+my %ILLUMINA_NUMS = qw(
+	1 ATCACG 2 CGATGT 3 TTAGGC 4 TGACCA 5 ACAGTG
+	6 GCCAAT 7 CAGATC 8 ACTTGA 9 GATCAG
+	01 ATCACG 02 CGATGT 03 TTAGGC 04 TGACCA 05 ACAGTG
+	06 GCCAAT 07 CAGATC 08 ACTTGA 09 GATCAG 10 TAGCTT
+	11 GGCTAC 12 CTTGTA 13 AGTCAA 14 AGTTCC 15 ATGTCA
+	16 CCGTCC 17 GTAGAG 18 GTCCGC 19 GTGAAA 20 GTGGCC
+	21 GTTTCG 22 CGTACG 23 GAGTGG 24 GGTAGC 25 ACTGAT
+	26 ATGAGC 27 ATTCCT 28 CAAAAG 29 CAACTA 30 CACCGG
+	31 CACGAT 32 CACTCA 33 CAGGCG 34 CATGGC 35 CATTTT
+	36 CCAACA 37 CGGAAT 38 CTAGCT 39 CTATAC 40 CTCAGA
+	41 GACGAC 42 TAATCG 43 TACAGC 44 TATAAT 45 TCATTC
+	46 TCCCGA 47 TCGAAG 48 TCGGCA);
+
+my %NUGEN_NUMS = qw(
+	1	AACCAG
+	2	TGGTGA
+	3	AGTGAG
+	4	GCACTA
+	5	ACCTCA
+	6	GTGCTT
+	7	AAGCCT
+	8	GTCGTA );
+
+
+# Get list of indices to split over
+my @input_indices = split(/,/, $indices);
+
+# Assign indices to use to new hash (using correct library)
+my %INDEXNUMS;
+if($opt_t eq "Illumina"){
+	@INDEXNUMS{@input_indices} = @ILLUMINA_NUMS{@input_indices};
+} elsif ($opt_t eq "NuGEN"){
+	@INDEXNUMS{@input_indices} = @NUGEN_NUMS{@input_indices};
+} else {
+	print STDERR "Library type $opt_t unknown!\n";
+	&usage;
+}
+
+demultiplexByCode(@input_indices);
+
+# If tmp file exists, delete
+if( -e "${qseq}.tmp" ){
+    unlink "${qseq}.tmp";
+}
+print STDERR "@@@ DONE " . `date`;
+# Given a list of index codes, splits the input file into multiple output files, one per index
+sub demultiplexByCode{
+    my @codes = @_;
+
+    #Determine filenames for output, and open filehandles
+    #Logging
+    print STDERR "@@@ Splitting $qseq into " .  ($#codes + 1) . " files using adapters ";
+    print STDERR "$_, " for @codes;
+    print STDERR "...\n";
+    print STDERR "Also splitting read 2 files...\n";
+
+    #Open files for output
+    my %output_filehandles;
+    my %read2_filehandles;
+    my @outnames = ();
+
+    # Open an output file for each index and 00
+    for my $i (@codes, "00"){
+        my $current_output = sprintf("s_%s_1_%s_%.2d_qseq.txt", $lane, $tile, $i);
+
+        push @outnames, $current_output;
+
+        print STDERR "@@@ LOG: Opening " . $current_output . " for writing...\n";
+
+        open my $fh, ">", $output_dir . "/" . $current_output or die "@@@ ERROR: Could not open $current_output\n";
+        $output_filehandles{$i} = $fh;
+        my $r2_output = $current_output;
+        substr($r2_output, 4, 1) = 2;
+        open my $r2_fh, ">", $output_dir . "/" . $r2_output or die "@@@ ERROR: Could not open $r2_output\n";
+        $read2_filehandles{$i} = $r2_fh;
+    }
+
+    #Generate mismatches for each sequence
+    my %mismatches;
+    print STDERR "@@@ LOG: Matching with 1 mismatch...\n";
+    for (@codes){
+        $mismatches{$_} = generateMismatch($INDEXNUMS{$_});
+    }
+
+    #Open QINDEX file for input, and write lines to output files based on adapter sequence (col 2)
+    while(defined(my $qseq = <QSEQ>) && defined(my $qindex = <QINDEX>)){
+        chomp($qseq);
+        chomp($qindex);
+        my $curr_index = (split /\t/, $qindex)[8];
+
+        # Cut index to first six characters
+        $curr_index = substr($curr_index, 0, 6);
+
+        my $matched = 0;
+        for my $i (@codes){
+            my @seq = @{$mismatches{$i}};
+            for my $s (@seq){
+                next if $matched;
+                if( $curr_index =~ $s){
+                    print { $output_filehandles{$i} } $qseq . "\n";
+                    print { $read2_filehandles{$i} } $qindex . "\n";
+                    $matched = 1;
+                }
+            }
+        }
+        unless($matched){
+            print { $output_filehandles{"00"} } $qseq . "\n";
+            print { $read2_filehandles{"00"} } $qindex . "\n";
+        }
+    }
+
+    #Close filehandles
+    for my $i (keys %output_filehandles){
+        close $output_filehandles{$i};
+    }
+    for my $i (keys %output_filehandles){
+        close $read2_filehandles{$i};
+    }
+    if($opt_c){
+        for my $o (@outnames){
+            system("gzip", "-f", "--best", $o);
+        }
+    }
+}
+
+###
+# Removed as I've literally never used this feature
+# Given a list of adaptor sequences, splits the input file into multiple output files, one per index
+# sub demultiplexByAdaptorSeq{
+#     my @indices = @_;
+#     my @codes = ();
+#     for my $i (@indices){
+#         push @codes, $REV_INDEX{$i};
+#     }
+#     demultiplexByCode(@codes);
+# }
+###
+
+#Given a string, returns an array of every string with a . in each position
+sub generateMismatch{
+    my $seq= shift;
+
+    my @patterns;
+    for(my $i = 0; $i < length($seq); $i++){
+        my $mm = $seq;
+        substr($mm, $i, 1 ) = ".";
+        push @patterns, $mm
+    }
+    # print "Returning for $seq:\n";
+    # print "$_\n" for @patterns;
+    return \@patterns;
+}
+
+sub usage{
+    print STDERR $USAGE;
+    exit 2;
+}

@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_qseq_1 [ -hlf ] in_dir out_dir lane indices
+
+Demultiplexes a directory of qseq files based on given indices
+Requirements:
+	Scripts in path:
+        qseqToQindex.sh
+        demultiplexQINDEX.pl
+Options:
+	-h	Show this message and exit
+	-f	Filter for only PF reads (value of 1)
+	-l	Perform a dry run on only two file pairs, ignoring SGE_TASK_ID
+			Most useful for debugging in local environment
+Input:
+	Directory containing pairs of files of format:
+		s_x_1_xxxx_qseq.txt.gz => read file
+		s_x_2_xxxx_qseq.txt.gz => index file
+		Where x is lane and tile, respectively
+Output:
+	Directory out_dir
+	Files of format:
+		s_x_1_xxxx_xx_qindex.txt.gz
+		Where x is lane, tile, and index respectively
+
+Run in array mode, 1-96 usually for one lane
+
+Michael Chambers, 2013
+'
+#Set if test run on local machine, not hoffman cluster
+LOCAL=0
+
+
+FILTER_ON_PF=0
+while getopts "hlf" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		f)
+			echo "@@@ LOG: Filtering on passing reads ..." $(date) >&2
+			FILTER_ON_PF=1
+			;;
+		l)
+			LOCAL=1
+			echo "@@@ LOG: Performing pipeline on first two file pairs ..." $(date) >&2
+			;;
+		\?)
+			echo "@@@ ERROR: Flag not recognized: $opt" >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( $OPTIND - 1 ))
+
+function checkFileExists() {
+	if [ ! -e $1 ]; then
+		echo "@@@ERROR@@@ File $1 does not exist! Exiting" `date` >&2
+		exit 1
+	fi
+}
+
+function process() {
+	IN_DIR=$1
+	OUT_DIR=$2
+	LANE=$3
+	INDICES=$4
+
+	#Sets input directory. If INPUTDIR not set, uses home directory
+	IN_DIR_BASE=`basename $IN_DIR`
+
+
+	#Tile set from environment variable
+	tile_array=()
+	for t in ${IN_DIR}/*gz; do
+		base_t=$(basename $t)
+		tile_t=${base_t:6:4}
+		tile_array=(${tile_array[@]} $tile_t)
+	done
+
+	TILE=${tile_array[ $(( $SGE_TASK_ID - 1)) ]}
+
+
+	## Old method; considered less robust
+	# if [ $SGE_TASK_ID -lt 17 ]; then
+	# 	TILE=$(( 1100 + $SGE_TASK_ID ))
+	# elif [ $SGE_TASK_ID -lt 33 ]; then
+	# 	TILE=$(( 1200 + $SGE_TASK_ID - 16 ))
+	# elif [ $SGE_TASK_ID -lt 49 ]; then
+	# 	TILE=$(( 1300 + $SGE_TASK_ID - 32 ))
+	# elif [ $SGE_TASK_ID -lt 65 ]; then
+	# 	TILE=$(( 2100 + $SGE_TASK_ID - 48 ))
+	# elif [ $SGE_TASK_ID -lt 81 ]; then
+	# 	TILE=$(( 2200 + $SGE_TASK_ID - 64 ))
+	# elif [ $SGE_TASK_ID -lt 97 ]; then
+	# 	TILE=$(( 2300 + $SGE_TASK_ID - 80 ))
+	# else
+	# 	exit 1
+	# fi
+
+	echo "@@@ Matching tile $TILE job id $SGE_TASK_ID" >&2
+
+	read_base=s_${LANE}_1_${TILE}_qseq.txt.gz
+	read_file=${IN_DIR}/${read_base}
+	checkFileExists $read_file
+
+	index_base=s_${LANE}_2_${TILE}_qseq.txt.gz
+	index_file=${IN_DIR}/${index_base}
+	checkFileExists $index_file
+
+	#Scratch directory for qindex files
+	#Make dirs if they do not exist
+	[[ -d $OUT_DIR ]] | { mkdir $OUT_DIR; echo "@@@ Log creating output directory $OUT_DIR..." $(date) >&2; }
+
+	#Converts qseq files to qindex and demultiplexes
+	#Output files in $OUT_DIR
+	#Input files of format s_?_1/2_????_qseq.txt.gz
+	#Output files of format s_?_1_????_??_qindex.txt.gz
+	if [ $FILTER_ON_PF -eq 1 ]; then
+		echo "@@@ Filtering on passing PF values..." `date` >&2
+		qseqToQindex $read_file $index_file | grep "	1$" | demultiplexQINDEX -co $OUT_DIR $LANE $TILE $INDICES
+	else
+		qseqToQindex $read_file $index_file | demultiplexQINDEX -co $OUT_DIR $LANE $TILE $INDICES
+	fi
+}
+
+# For benchmarking in local environment; LOCAL flag set to 1
+# Sources a setup script present in the present directory and then performes the analysis on the first two file pairs
+# of a lane.
+if [ $LOCAL -eq 1 ]; then
+	# source ../setup.sh
+ 	for i in `seq 1 1`; do
+ 		export SGE_TASK_ID=$i
+ 		process $@
+ 	done
+else
+	export PATH=${PATH}:/u/home/m/mchamber/bin
+	process $@
+fi

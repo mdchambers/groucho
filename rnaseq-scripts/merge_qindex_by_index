@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: mergeQindexbyIndex.sh [ -h ] [ -o output_directory ] [ -i index ] input_directory file_prefix
+
+Merges a directy of qindex files by index.
+Arguments:
+	-h		Display this message and exit
+	-o		Output directory; created if does not exist
+	-i		Index to merge to output directory; if does not exist, then all directories are processed
+				Note: Alternate index processing requires input files to be of the format s_?_?_????_??_qindex.txt.gz
+				Where the last pair of ?? are the two-digit index
+	input_directory	Directory containing input files to be merged; must be gzipped
+	file_prefix	prefix to append to output files
+Input:
+	A directory of qindex files, demultiplexed
+Output:
+	A single merged qindex file of format s_?_?_????_??_qindex.txt.gz where the last ?? is the double-digit index
+
+Michael Chambers, 2012
+'
+OUT_DIR="."
+indices=-1
+while getopts "o:i:h" opt; do
+	case $opt in
+		o)
+			OUT_DIR=$OPTARG
+			;;
+		i)
+			indices=$OPTARG
+			;;
+		h)
+			echo "$USAGE" >&2
+			exit 2
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $(( OPTIND - 1 ))
+
+if [ $# -ne 2 ]; then
+	echo "@@@ ERROR: Incorrect number of arguments" `date` >&2
+	exit 1
+fi
+
+IN_DIR=$1
+PREFIX=$2
+
+#Get relevant index numbers and file prefix
+#If INDEX not set, do all indices. Otherwise, just use i option arg
+if [[ $indices -eq -1 ]]; then
+	indices=( `ls -1 ${IN_DIR} | cut -d_ -f 5 | sort | uniq` )
+fi
+
+for i in ${indices[@]}; do
+	out_file=${OUT_DIR}/${PREFIX}_${i}_qindex.txt.gz
+	echo "@@@ Merging index $i files to $out_file..." `date` >&2
+	cat ${IN_DIR}/s_?_?_????_${i}_qindex.txt* > $out_file
+done

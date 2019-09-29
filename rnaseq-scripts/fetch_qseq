@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: fetchQSEQ.sh [ -h ] [ -f credentials_file ] [ lane password ]
+
+Fetches qseq files from the UCLA MCDB server.
+First checks if INPUTDIR env var is defined. If so, moves to that dir and rsyncs files there.
+User must edit script to list lane IDs to be fectched.
+Corresponding lane passwords must be stored in a "credentials" file
+File must have lane ID in first column and password in second.
+
+Michael Chambers, 2013
+'
+
+while getopts "hf:" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		f)
+			echo "Reading credentials file $OPTARG" >&2
+			credentials=$OPTARG
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( $OPTIND - 1 ))
+
+SERVER=pan.pellegrini.mcdb.ucla.edu
+
+if [ -n "$credentials" ]; then
+	echo "Fetching " `cat $credentials | cut -f 1 | wc -l` " files from remote server" >&2
+	for x in `cut -f 1 $credentials`; do
+		RSYNC_PASSWORD=`grep $x $credentials | cut -f 2`
+		echo "Fetching $x with $RSYNC_PASSWORD"
+		export RSYNC_PASSWORD
+		rsync --recursive --times --verbose --stats --progress --itemize-changes rsync://${x}@${SERVER}/${x} ${x}
+		echo "Done" `date`
+	done
+else
+	lane=$1
+	pass=$2
+	echo "Fetching $lane with password $pass" >&2
+	RSYNC_PASSWORD=$pass
+	export RSYNC_PASSWORD
+	rsync --recursive --times --verbose --stats --progress --itemize-changes rsync://${lane}@${SERVER}/${lane} ${lane}
+fi
+
+echo "Done" `date` >&2

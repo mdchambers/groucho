@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_sample [ -h ] sample_size indices input_dir output_dir
+
+A complete bash pipeline on a sample
+
+Michael Chambers, 2014
+'
+
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit 1
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+if [ $# -lt 4 ]; then
+	echo $USAGE >&2
+	exit 2
+fi
+
+num=$1
+index=$2
+input_dir=$3
+output_dir=$4
+
+pipeline_demulti_and_convert -n $num $input_dir $output_dir $index
+
+for x in ${output_dir}/s_?_1_??.fq.gz; do
+	base_x=$( basename $x .fq.gz )
+	tophat_out=${output_dir}/${base_x}_tophat
+	pipeline_tophat $x $tophat_out
+done
+
+# # TODO: Cufflink scripts?

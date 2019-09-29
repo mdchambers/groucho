@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_tophat.sh  [ -hqp ] [ -n name ] fastq [ fastq_rev ] output_dir tophat_args
+
+A simple RNA-seq pipeline
+
+Michael Chambers, 2014-03-11
+'
+
+opt_q=false
+opt_p=false
+while getopts "hqpn:" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		q)
+			echo "Queuing tophat run" >&2
+			opt_q=true
+			;;
+		p)
+			echo "Doing paired-end alignment" >&2
+			opt_p=true
+			;;
+		n)
+			echo "Run name: $OPTARG" >&2
+			opt_n=$OPTARG
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+shift $(( $OPTIND - 1))
+
+
+if [ $# -lt 2 ]; then echo $USAGE; exit 2; fi
+
+# Initialize Hoffman environment
+source ~/setup.sh
+
+fastq=$1
+shift
+
+if [ ! -n "$opt_n" ]; then opt_n=$( basename $fastq ); fi
+
+fastq_rev=""
+if [[ "$opt_p" == true ]]; then
+	fastq_rev=$1
+	shift
+fi
+out_dir=$1
+shift
+
+if [[ "$opt_q" == true ]]; then
+	cmd="qsub -l h_rt=12:00:00,h_data=6G -N $opt_n -pe shared 4 -cwd -b y \"~/bin/tophat_wrapper -p 4 $@ -o $out_dir /u/home/m/mchamber/annotation/index_dm3_igenome/genome $fastq $fastq_rev\""
+else
+	cmd="tophat_wrapper $@ -o $out_dir /u/home/m/mchamber/annotation/index_dm3_igenome/genome $fastq $fastq_rev"
+fi
+
+echo "Runnning: $cmd" >&2
+eval $cmd

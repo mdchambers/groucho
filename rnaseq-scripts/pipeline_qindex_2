@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: pipeline_qseq_2 [ -h - i index ] in_dir out_dir run indices
+
+Takes a directory of qindex files, such as those produced as the
+output of qseqPipeline.sh, and generates a single fastq file per
+index.
+
+Options:
+	h	Display this message and exit
+	i	Analyze only one of the indices
+Requirements:
+	Scripts: mergeQindexbyIndex.sh, qindexToFQ.sh
+Input:
+	Directory of demultiplexed qseq files in SCRATCH of format
+		Run_lane_indices_demultiplex
+
+Output:
+	Dir in SCRATCH / Run_lane_indices_qindex
+
+Michael Chambers, 2013
+'
+
+SINGLE_INDEX=-1
+
+while getopts "hi:" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		i)
+			echo "Analyzing index $OPTARG ..." >&2
+			SINGLE_INDEX=$OPTARG
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+shift $(( $OPTIND - 1 ))
+### Uncomment for production runs ###
+export PATH=${PATH}:/u/home/m/mchamber/bin
+###
+
+### Uncomment for testing/benchmark runs ###
+# source ../TMPsetupEnv.sh
+# export SCRATCH=scratch
+###
+IN_DIR=$1
+OUT_DIR=$2
+LANE=$3
+INDICES=$4
+
+IN_DIR_BASE=`basename $IN_DIR`
+if [ ! -d $IN_DIR ]; then
+	echo "@@@ERROR ${0}: Could not find ${IN_DIR}" `date` >&2
+	exit 1
+fi
+
+if [ ! -d $OUT_DIR ]; then mkdir $OUT_DIR; fi
+
+## Check if merging all indices; otherwise only do one w/ mergeQindexbyIndex.sh
+if [[ $SINGLE_INDEX -lt 0 ]]; then
+	echo "@@@ LOG ${0}: Beginning demultiplexing of " $(basename $IN_DIR) " with indices $INDICES" $(date) >&2
+	mergeQindexbyIndex.sh -o $OUT_DIR $IN_DIR Lane${LANE}
+
+	## Convert merged qindex files to fastq in OUT_DIR
+	for file in ${OUT_DIR}/Lane*; do
+		qindexToFQ.sh -c $file $OUT_DIR
+	done
+else
+	echo "@@@ LOG ${0}: Beginning demultiplexing of " `basename $IN_DIR` " with index $SINGLE_INDEX" $(date) >&2
+	mergeQindexbyIndex.sh -o $OUT_DIR -i $SINGLE_INDEX $IN_DIR Lane${LANE}
+
+	## Convert merged qindex file to fastq in OUT_DIR
+	qindexToFQ.sh -c ${OUT_DIR}/Lane${LANE}_${SINGLE_INDEX}_qindex.txt.gz $OUT_DIR
+fi
+
+
+
+
+
+

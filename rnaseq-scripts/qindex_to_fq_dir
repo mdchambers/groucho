@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+USAGE='
+Usage: qindexToFastaQ.sh [ -h ] { input_directory | input_qindex_file } file
+
+Converts demultiplexed qindex file or directory of files to FastaQ
+
+file_prefix should be of the form s_?_?_NNNN_?
+
+where the ? marks are lane, end, and index, respectively.
+		
+Michael Chambers, 2013
+'
+
+input=$1
+file_prefix=$2
+while getopts "h" opt; do
+	case $opt in
+		h)
+			echo "$USAGE" >&2
+			exit
+			;;
+		\?)
+			echo "Flag not recognized: " >&2
+			echo "$USAGE" >&2
+			exit 2
+			;;
+	esac
+done
+
+OUTLANE=${file_prefix:2:1}
+OUTEND=${file_prefix:4:1}
+OUTINDEX=${file_prefix:11:1}
+ALLOUT=s_${OUTLANE}_${OUTEND}_0000_${OUTINDEX}.fq
+if [ -e $ALLOUT ]; then
+	echo "$ALLOUT already exists!!! Exiting"
+	exit 1;
+fi
+convert() {
+	file=$1
+	BASE=`basename $file`
+	LANE=${BASE:2:1}
+	END=${BASE:4:1}
+	TILE=${BASE:6:4}
+	INDEX=${BASE:11:1}
+
+	OUTFILE=${BASE//_qindex.txt.gz/}.fq
+	echo '@@@ ' "Starting fastq conversion of $BASE..." `date` >&2
+	zcat $file | awk '
+		BEGIN { readnum = 0; }
+		{
+			if(NF != 5) {
+				#ignore
+			} else {
+				lane		= '$LANE'
+				end_num		= '$END'
+				tile		= '$TILE'
+				read_seq 	= $1
+				index_seq   = $2
+				read_qual   = $3
+				index_qual 	= $4
+				pf_val   	= $5
+				readnum++;
+				mylen = length(read_seq);
+				printf "\@%09d\:%s\:%s\:%s\:%s\:%01d\#len = %02d\n", readnum, lane, end_num, tile, index_seq, pf_val, mylen;
+				print read_seq;
+				print "\+";
+				print read_qual;
+ 			}
+ 			
+		}' > $OUTFILE
+		cat $OUTFILE >> $ALLOUT
+		gzip --best $OUTFILE
+	echo '@@@ ' "Done" `date` >&2
+}
+
+
+
+if [ -d $input ]; then
+	for file in ${input}/s_?_?_????_?_qindex.txt.gz; do
+		convert $file
+	done
+	# gzip --best $ALLOUT
+else
+	convert $input
+fi
+

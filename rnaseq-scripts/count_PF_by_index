@@ -1,0 +1,60 @@
+#!/usr/bin/env perl
+use strict;
+use Getopt::Std;
+use PerlIO::via::gzip;
+
+my $USAGE ='
+Usage: countPFbyIndex.pl  [-h] indices qseq_file
+
+Outputs counts of pass/fails by index
+
+Arguments:
+
+     -i index string. String of indices seperated by commas
+
+Michael Chambers, 2012
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+&usage if($#ARGV < 0);
+my $indices_string = shift;
+my $qseq = shift;
+my $fh;
+open($fh, "<:via(gzip)", $qseq) or die "could not find file\n";
+
+my @indices = split(/,/, $indices_string);
+my %counts = map { $_ => [0, 0, 0] } @indices;
+
+while(<$fh>){
+	chomp;
+	#print "Line: $_";
+	for my $i (keys(%counts)){
+		if(/$i/){
+			my $pf = substr($_, -1);
+			#print "Found index $i and pf $pf\n";
+			if($pf == 1){
+				$counts{$i}[0]++;
+			}elsif($pf == 0){
+				$counts{$i}[1]++;
+			}
+			$counts{$i}[2]++;
+		}
+	}
+}
+
+#Print hash values
+for my $key (keys(%counts)){
+	print "$key\t";
+	for (@{$counts{$key}}){
+		print $_ . "\t";
+	}
+	print "\n";
+}
+
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}

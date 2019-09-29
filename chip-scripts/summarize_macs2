@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Std;
+my $USAGE ='
+Usage: summarize_macs2  -h file1 [ file2 ... ]
+
+Summarizes a MACS2 log file(s) (generally STDERR during run)
+
+Michael Chambers, 2014
+';
+
+our($opt_h);
+getopts('h');
+&usage if($opt_h);
+#&usage if($#ARGV < 0);
+my @files = @ARGV;
+
+my $header = "File\tChipFile\tCtrlFile\tEffective Genome Size\tBand Width\tTag Size\tTotal Tags\tUnfilterd Tags\tRedundancy Rate\tNum Peaks\tPred Fragment Len\n";
+print $header;
+
+for(@files){
+	my $file = $_;
+	my $chip="";
+	my $ctrl="";
+	my $eff_genome_size = 0;
+	my $band_width = 0;
+	my $tag_size = 0;
+	my $total_tags = 0;
+	my $post_filter_tags = 0;
+	my $redundant_rate = 0;
+	my $peak_number = 0;
+	my $fragment_length = 0;
+	open LOG, "< $_" or die "Could not open logfile $_\n";
+	while(<LOG>){
+		chomp;
+		my @line = split;
+		if(/ChIP-seq file/){
+			/(\[.*\])/;
+			$chip = $1;
+			$chip =~ tr/\[\] '//d;
+		}
+		if(/control file/){
+			/(\[.*\])/;
+			$ctrl = $1;
+			$ctrl =~ tr/\[\] '//d;
+		}
+		if(/effective genome size/){
+			$eff_genome_size = $line[-1];
+		}
+		if(/band width/){
+			$band_width = $line[-1];
+		}
+		if(/tag size = /){
+			$tag_size = $line[-1];
+		}
+		if(/total tags/){
+			$total_tags = $line[-1];
+		}
+		if(/tags after filtering/){
+			$post_filter_tags = $line[-1];
+		}
+		if(/Redundant rate/){
+			$redundant_rate = $line[-1];
+		}
+		if(/number of paired peaks/){
+			$peak_number = $line[-1];
+		}
+		if(/predicted fragment length/){
+			$fragment_length = $line[-2];
+		}
+	}
+	print "$file\t$chip\t$ctrl\t$eff_genome_size\t$band_width\t$tag_size\t$total_tags\t$post_filter_tags\t$redundant_rate\t$peak_number\t$fragment_length\n";
+}
+
+
+sub usage{
+	print STDERR $USAGE;
+	exit 2;
+}
